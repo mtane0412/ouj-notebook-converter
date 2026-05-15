@@ -1,0 +1,65 @@
+# 仕様: ouj-notebook-converter パッケージの依存関係・ビルド設定・ツール設定を定義する
+[project]
+name = "ouj-notebook-converter"
+version = "0.1.0"
+description = "放送大学テキストPDFをAIフレンドリーなテキスト形式へ変換するCLI/ライブラリ"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "mtane0412", email = "mtane0412@gmail.com" }
+]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "rich>=13.7",
+    "markdown-it-py>=3.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# OCR エンジン（torch/GPU を要するため任意依存）
+# 注意: pix2tex は timm==0.5.4 を要求し yomitoku の timm>=1.0.11 と競合するため
+#       ocr extra と同一環境での併用不可。別 venv での利用を推奨。
+ocr = ["yomitoku>=0.10"]
+epub = ["pypandoc>=1.13"]
+
+[project.scripts]
+ounc = "ouj_notebook_converter.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5",
+    "pytest-mock>=3.14",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "reportlab>=4",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = [
+    "E501",
+    "RUF001",  # 日本語コメント内の全角括弧は意図的
+    "RUF002",  # 日本語 docstring 内の全角括弧は意図的
+    "RUF003",  # 日本語コメント内の全角括弧は意図的
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+markers = ["slow: 実 PDF を使う重いテスト (deselect with '-m \"not slow\"')"]
+addopts = "-m 'not slow'"
+testpaths = ["tests"]

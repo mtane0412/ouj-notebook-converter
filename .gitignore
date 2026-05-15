@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.uv/
+
+# uv
+uv.lock
+
+# ビルド成果物
+dist/
+build/
+*.egg-info/
+
+# テストカバレッジ
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# プロジェクト固有: 教科書PDF（著作権・容量）とキャッシュ・出力
+samples/
+out/
+.cache/
+
+# macOS
+.DS_Store
