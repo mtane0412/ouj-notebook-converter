@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 
@@ -51,3 +52,34 @@ class PageMarkdown:
     page_index: int
     markdown: str
     referenced_assets: list[Path] = field(default_factory=list)
+
+
+class ChapterKind(str, Enum):
+    """章の種別。"""
+
+    PREFACE = "preface"      # 前書き / まえがき / はじめに
+    CHAPTER = "chapter"      # 第N章
+    AFTERWORD = "afterword"  # 後書き / あとがき / おわりに
+    INDEX = "index"          # 索引
+
+
+@dataclass(frozen=True)
+class ChapterSpec:
+    """章検出ステージの出力。1 章分のメタ情報とページ範囲を保持する。
+
+    - order: 出力ファイル名のゼロパディング番号（00=前書き, 01〜N=本章, N+1=後書き, N+2=索引）
+    - kind: 章の種別
+    - chapter_number: 第N章のN（kind=CHAPTER のときのみ非 None）
+    - title: 章見出し本文（例: 「データとは何か」）
+    - start_page_index: 0-origin で章が始まるページ（inclusive）
+    - end_page_index: 0-origin で章が終わるページ（inclusive）
+    - source: 検出ソース識別子 ("syllabus" / "pdf_toc" / "ocr_toc" / "body_headings")
+    """
+
+    order: int
+    kind: ChapterKind
+    chapter_number: int | None
+    title: str
+    start_page_index: int
+    end_page_index: int
+    source: str
