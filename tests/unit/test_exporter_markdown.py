@@ -35,7 +35,7 @@ class TestExportMarkdownCombine:
         content = out_md.read_text()
         assert "第1章" in content
 
-    def test_ページ間にページマーカーが挿入される(self, tmp_path: Path) -> None:
+    def test_ページマーカーは挿入されない(self, tmp_path: Path) -> None:
         pages = [
             _make_page(0, "ページ1の内容"),
             _make_page(1, "ページ2の内容"),
@@ -43,8 +43,7 @@ class TestExportMarkdownCombine:
         out_md = tmp_path / "output.md"
         export_markdown(pages, out_md, tmp_path / "assets")
         content = out_md.read_text()
-        assert "<!-- page: 1 -->" in content
-        assert "<!-- page: 2 -->" in content
+        assert "<!-- page:" not in content
 
     def test_ページの内容が順序通りに結合される(self, tmp_path: Path) -> None:
         pages = [
@@ -122,9 +121,9 @@ class TestExportMarkdownSeparate:
         assert (out_dir / "page_0001.md").exists()
         assert (out_dir / "page_0002.md").exists()
 
-    def test_個別ページにもページマーカーが入る(self, tmp_path: Path) -> None:
+    def test_個別ページにページマーカーは入らない(self, tmp_path: Path) -> None:
         pages = [_make_page(0, "ページ1")]
         out_dir = tmp_path / "pages"
         export_markdown(pages, out_dir, tmp_path / "assets", combine=False)
         content = (out_dir / "page_0001.md").read_text()
-        assert "<!-- page: 1 -->" in content
+        assert "<!-- page:" not in content

@@ -1,7 +1,6 @@
 """仕様: PageMarkdown リストから最終的な Markdown ファイルを生成するエクスポーター。
 
 処理内容:
-- ページ間に <!-- page: N --> マーカーを挿入する（1-origin）
 - figure の絶対パス参照を assets_dir 以下の相対パスに書き換える
 - referenced_assets のファイルを assets_dir 以下にコピーする
 - combine=True の場合は 1 ファイルに結合、False の場合はページごとのファイルに分割する
@@ -53,10 +52,9 @@ def export_markdown(
 
 
 def _process_page(page: PageMarkdown, assets_dir: Path) -> str:
-    """1 ページ分の Markdown を処理してページマーカーを付加する。
+    """1 ページ分の Markdown を処理する。
 
-    - referenced_assets をコピーし、markdown 内の絶対パス参照を相対パスに書き換える。
-    - 先頭に <!-- page: N --> マーカーを挿入する（N は 1-origin）。
+    referenced_assets をコピーし、markdown 内の絶対パス参照を相対パスに書き換える。
     """
     # figure ファイルをコピーし、パス変換マップを作る
     path_map: dict[str, str] = {}
@@ -67,10 +65,7 @@ def _process_page(page: PageMarkdown, assets_dir: Path) -> str:
 
     markdown = _rewrite_figure_paths(page.markdown, path_map)
 
-    # 1-origin のページマーカーを先頭に付ける
-    page_number = page.page_index + 1
-    marker = f"<!-- page: {page_number} -->"
-    return f"{marker}\n\n{markdown}"
+    return markdown
 
 
 def _copy_asset(asset: Path, assets_dir: Path) -> Path:

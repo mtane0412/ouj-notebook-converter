@@ -28,7 +28,9 @@ def load_pdf_pages(pdf_path: Path, *, dpi: int = 200) -> Any:
         raise FileNotFoundError(f"PDF ファイルが見つかりません: {pdf_path}")
 
     try:
-        from yomitoku.data.functions import load_pdf  # type: ignore[import-untyped]
+        from yomitoku.data.functions import (
+            load_pdf,
+        )
     except ImportError as e:
         raise ImportError(
             "yomitoku がインストールされていません。\n"

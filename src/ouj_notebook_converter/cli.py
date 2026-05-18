@@ -49,7 +49,6 @@ def convert(
     device: Annotated[
         str, typer.Option("-d", "--device", help="推論デバイス: mps / cpu / cuda")
     ] = "mps",
-    lite: Annotated[bool, typer.Option("--lite/--no-lite", help="軽量モデルを使用")] = False,
     dpi: Annotated[int, typer.Option(help="PDF レンダリング DPI")] = 200,
     pages: Annotated[
         str | None, typer.Option("--pages", help="処理するページ範囲 例: 1,3-5,10")
@@ -65,12 +64,9 @@ def convert(
         ReadingOrder,
         typer.Option("--reading-order", help="読み順推定モード"),
     ] = ReadingOrder.auto,
-    ignore_line_break: Annotated[
-        bool, typer.Option("--ignore-line-break", help="段落内改行を無視")
-    ] = False,
     ignore_meta: Annotated[
-        bool, typer.Option("--ignore-meta", help="ヘッダ/フッタを除外")
-    ] = False,
+        bool, typer.Option("--ignore-meta/--no-ignore-meta", help="ヘッダ/フッタを除外")
+    ] = True,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -101,13 +97,11 @@ def convert(
         typer.echo(f"エラー: 必要なモジュールのインポートに失敗しました。\n{e}", err=True)
         raise typer.Exit(code=1) from e
 
-    effective_cache_dir = cache_dir or (outdir / ".cache")  # type: ignore[operator]
+    effective_cache_dir = cache_dir or (outdir / ".cache")
 
     analyzer = create_analyzer(
         device=device,
-        lite=lite,
         reading_order=reading_order.value,
-        ignore_line_break=ignore_line_break,
         ignore_meta=ignore_meta,
     )
 
@@ -125,7 +119,6 @@ def convert(
         dpi=dpi,
         analyzer=analyzer,
         reading_order=reading_order.value,
-        ignore_line_break=ignore_line_break,
         ignore_meta=ignore_meta,
     )
 

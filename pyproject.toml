@@ -59,6 +59,10 @@ ignore = [
 python_version = "3.11"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["yomitoku", "yomitoku.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 markers = ["slow: 実 PDF を使う重いテスト (deselect with '-m \"not slow\"')"]
 addopts = "-m 'not slow'"

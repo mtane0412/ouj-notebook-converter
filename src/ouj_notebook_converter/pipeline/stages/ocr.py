@@ -26,12 +26,7 @@ class AnalyzerResult(Protocol):
         ...
 
     def to_markdown(self, path: str | Path, **kwargs: Any) -> None:
-        """OCR 結果を Markdown に書き出す。"""
-        ...
-
-    @property
-    def figure_paths(self) -> list[Path]:
-        """切り出し済み figure 画像のパスリスト。"""
+        """OCR 結果を Markdown に書き出す。img キーワード引数で元画像を渡す（yomitoku 0.13.0 必須）。"""
         ...
 
 
@@ -75,10 +70,11 @@ def analyze_page(
     results.to_json(json_path)
 
     raw_md_path = cache_page_dir / "raw.md"
-    results.to_markdown(raw_md_path)
+    results.to_markdown(raw_md_path, img=image, ignore_line_break=True)
 
-    # figure ファイルのパスを収集（存在するものだけ）
-    figure_paths = [p for p in results.figure_paths if p.exists()]
+    # to_markdown が cache_page_dir/figures/ に PNG を保存するため glob で収集する
+    figures_dir = cache_page_dir / "figures"
+    figure_paths = sorted(figures_dir.glob("*.png")) if figures_dir.exists() else []
 
     return PageAnalysis(
         page_index=-1,  # runner が page_index を置き換える
@@ -91,27 +87,23 @@ def analyze_page(
 def create_analyzer(
     *,
     device: str = "mps",
-    lite: bool = False,
     reading_order: str = "auto",
-    ignore_line_break: bool = False,
-    ignore_meta: bool = False,
+    ignore_meta: bool = True,
 ) -> Any:
-    """本番用の Yomitoku DocumentAnalyzer を生成する。
+    """本番用の Yomitoku DocumentAnalyzer を生成する（yomitoku 0.13.0 API 対応）。
 
     yomitoku が未インストールの場合は ImportError を Fail-Fast で送出する。
 
     Args:
         device: 推論デバイス（"mps" / "cpu" / "cuda"）。
-        lite: True の場合は軽量モデルを使用する（CPU 実行向け）。
-        reading_order: 読み順推定モード。
-        ignore_line_break: True の場合は段落内の改行を無視する。
+        reading_order: 読み順推定モード（"auto" / "right2left" / "top2bottom"）。
         ignore_meta: True の場合はヘッダ/フッタを除外する。
 
     Raises:
         ImportError: yomitoku が未インストールの場合。
     """
     try:
-        from yomitoku import DocumentAnalyzer  # type: ignore[import-untyped]
+        from yomitoku import DocumentAnalyzer
     except ImportError as e:
         raise ImportError(
             "yomitoku がインストールされていません。\n"
@@ -120,17 +112,9 @@ def create_analyzer(
             "  または: pip install 'ouj-notebook-converter[ocr]'"
         ) from e
 
-    configs: dict[str, Any] = {}
-    if reading_order != "auto":
-        configs["reading_order"] = reading_order
-    if ignore_line_break:
-        configs["ignore_line_break"] = True
-    if ignore_meta:
-        configs["ignore_meta"] = True
-
     return DocumentAnalyzer(
         visualize=False,
         device=device,
-        lite=lite,
-        configs=configs if configs else None,
+        reading_order=reading_order,
+        ignore_meta=ignore_meta,
     )

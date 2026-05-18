@@ -51,7 +51,6 @@ class ConvertConfig:
     dpi: int
     analyzer: Any               # AnalyzerProtocol を満たすオブジェクト
     reading_order: str = "auto"
-    ignore_line_break: bool = False
     ignore_meta: bool = False
 
 

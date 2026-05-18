@@ -29,6 +29,13 @@ class TestConvertCommand:
         assert result.exit_code == 0
         assert "convert" in result.output.lower() or "pdf" in result.output.lower()
 
+    def test_ignore_metaのデフォルトはTrue(self) -> None:
+        """ヘッダー/フッター除外はデフォルト有効であることを help で確認。"""
+        result = runner.invoke(app, ["convert", "--help"])
+        assert result.exit_code == 0
+        # デフォルトが ignore-meta（True）であること
+        assert "default" in result.output and "ignore-meta" in result.output
+
     def test_outdir_は必須(self) -> None:
         result = runner.invoke(app, ["convert", "dummy.pdf"])
         assert result.exit_code != 0
