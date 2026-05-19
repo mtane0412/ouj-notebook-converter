@@ -180,11 +180,12 @@ class TestMathDetect:
         assert len(result.originals) == 1
         assert "E=mc^2" in result.originals.values()
 
-    def test_math_detectはembeddingをinline_formulaに変換する(
+    def test_math_detectはembeddingをスキップしてMathOverlayに登録しない(
         self, tmp_path: Path, mocker: MagicMock
     ) -> None:
+        # embedding（インライン数式）は段落全体置換ができないためスキップする
         paragraphs = [
-            {"box": [0, 0, 100, 50], "contents": "インライン数式", "role": None, "order": 0},
+            {"box": [0, 0, 100, 50], "contents": "インライン数式が含まれる段落", "role": None, "order": 0},
         ]
         analysis = _make_page_analysis(tmp_path, paragraphs)
         detections = [
@@ -196,7 +197,8 @@ class TestMathDetect:
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector)
 
-        assert "inline_formula" in result.roles.values()
+        # embedding はスキップされるため MathOverlay は空になる
+        assert result.items == {}
 
     def test_math_detectはisolatedをdisplay_formulaに変換する(
         self, tmp_path: Path, mocker: MagicMock
@@ -240,11 +242,12 @@ class TestMathDetect:
         assert result.items == {}
         assert any("スキップ" in r.message for r in caplog.records)
 
-    def test_math_detectはクロップPNGを連番でmath_ディレクトリに保存する(
+    def test_math_detectはisolatedのみMathOverlayに登録する(
         self, tmp_path: Path, mocker: MagicMock
     ) -> None:
+        # isolated 1 件 + embedding 1 件 → isolated のみ登録、embedding はスキップ
         paragraphs = [
-            {"box": [0, 0, 100, 50], "contents": "数式A", "role": None, "order": 0},
+            {"box": [0, 0, 100, 50], "contents": "インライン数式の段落", "role": None, "order": 0},
             {"box": [0, 60, 100, 110], "contents": "数式B", "role": None, "order": 1},
         ]
         analysis = _make_page_analysis(tmp_path, paragraphs)
@@ -260,7 +263,8 @@ class TestMathDetect:
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector)
 
-        # 2 件の数式が MathOverlay に登録されていること
-        assert len(result.items) == 2
-        assert len(result.roles) == 2
-        assert len(result.originals) == 2
+        # isolated 1 件のみ登録されていること（embedding はスキップ）
+        assert len(result.items) == 1
+        assert len(result.roles) == 1
+        assert len(result.originals) == 1
+        assert "display_formula" in result.roles.values()

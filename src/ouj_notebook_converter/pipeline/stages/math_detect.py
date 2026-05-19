@@ -172,6 +172,11 @@ def math_detect(
     originals: dict[Path, str] = {}
 
     for idx, detection in enumerate(detections):
+        # embedding（インライン数式）は段落全体置換できないためスキップ
+        # インライン数式の部分置換は将来の機能拡張で対応する
+        if detection.type == "embedding":
+            continue
+
         matched_para = match_paragraph_by_ioa(detection.box, paragraphs)
         if matched_para is None:
             latex_preview = detection.latex[:40]
