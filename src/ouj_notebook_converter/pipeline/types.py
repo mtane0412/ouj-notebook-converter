@@ -13,6 +13,20 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class InlineParagraphReplacement:
+    """1 paragraph 分のインライン数式置換情報。
+
+    word_contents: paragraph 内 word を reading order で並べた content タプル（escape 前）。
+    latex_spans  : (start_word_idx, end_word_idx_exclusive, latex) のタプル群。
+                   start..end が数式範囲の word インデックスを示し、それ以外は通常テキストとして残す。
+                   reading order 順（start 昇順）で格納する。
+    """
+
+    word_contents: tuple[str, ...]
+    latex_spans: tuple[tuple[int, int, str], ...]
+
+
+@dataclass(frozen=True)
 class PageJob:
     """1 ページ分の処理単位。パイプラインへの入力情報を保持する。"""
 
@@ -38,16 +52,22 @@ class PageAnalysis:
 
 @dataclass(frozen=True)
 class MathOverlay:
-    """math_extract ステージの出力。クロップ画像 → LaTeX の対応を保持する。
+    """math_extract / math_detect ステージの出力。クロップ画像 → LaTeX の対応を保持する。
 
     items[crop_path]    : LaTeX 文字列。空文字は「変換しなかった」を意味する
     roles[crop_path]    : "inline_formula" / "display_formula"
     originals[crop_path]: 元 paragraph.contents（raw.md 上の置換対象テキスト）
+                          display_formula 専用。inline_formula は inline_paragraphs で管理する
+    inline_paragraphs   : paragraph インデックス → InlineParagraphReplacement。
+                          math_detect バックエンドが embedding 型を登録する。
+                          paragraph 単位で word 分割置換を行うため、複数 inline が同一 paragraph に
+                          あっても 1 エントリで集約される。
     """
 
     items: dict[Path, str] = field(default_factory=dict)
     roles: dict[Path, str] = field(default_factory=dict)
     originals: dict[Path, str] = field(default_factory=dict)
+    inline_paragraphs: dict[int, InlineParagraphReplacement] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

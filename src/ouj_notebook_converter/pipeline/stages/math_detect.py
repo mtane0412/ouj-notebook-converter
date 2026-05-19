@@ -6,8 +6,12 @@
   3. yomitoku words の日本語 word を除外して detection.box をトリミング（日本語ラベル混入対策）
   4. トリミングした場合は recognizer.recognize_image() で再認識して LaTeX を差し替え
   5. analysis.json の全 paragraph から IoA 最大の paragraph とマッチング
-  6. マッチした paragraph の contents を original として MathOverlay に登録
-  7. マッチしない検出 / 全体が日本語 word の検出は warning ログを出してスキップ
+  6. detection.type に応じて振り分け:
+     - isolated (display_formula) : paragraph.contents を originals に登録（段落全体置換）
+     - embedding (inline_formula) : paragraph 内 word を IoA で収集し、embedding bbox と重なる
+                                    word の span を inline_paragraphs に登録（段落内部分置換）
+  7. マッチしない検出 / 全体が日本語 word の検出 / word が見つからない embedding は
+     warning ログを出してスキップ（yomitoku OCR テキストがそのまま raw.md に残る）
 
 IoA マッチ閾値: 0.5
   IoA = intersection / formula_bbox_area
@@ -28,7 +32,11 @@ from PIL import Image
 from yomitoku.utils.misc import save_image
 
 from ouj_notebook_converter.pipeline.stages.math_extract import MathParagraph, crop_math_image
-from ouj_notebook_converter.pipeline.types import MathOverlay, PageAnalysis
+from ouj_notebook_converter.pipeline.types import (
+    InlineParagraphReplacement,
+    MathOverlay,
+    PageAnalysis,
+)
 from ouj_notebook_converter.plugins.math.base import (
     FormulaDetection,
     MathDetectorProtocol,
@@ -287,6 +295,152 @@ def match_paragraph_by_ioa(
     return best_para
 
 
+def collect_words_in_paragraph(
+    para_box: tuple[int, int, int, int],
+    words: list[dict[str, Any]],
+    *,
+    contain_threshold: float = 0.5,
+) -> list[dict[str, Any]]:
+    """paragraph bbox に IoA（word_area 分母）で閾値以上含まれる word を返す。
+
+    yomitoku の extract_words_within_element と同じ閾値（0.5）を採用する。
+
+    Args:
+        para_box: paragraph の bbox (x1, y1, x2, y2)。
+        words: analysis.json の words[] リスト。
+        contain_threshold: word IoA の閾値（この値以上の word のみ返す）。
+
+    Returns:
+        paragraph 内に含まれる word dict のリスト。
+    """
+    px1, py1, px2, py2 = para_box
+    result = []
+    for word in words:
+        pts = word.get("points", [])
+        if not pts:
+            continue
+        wx1, wy1, wx2, wy2 = word_points_to_box(pts)
+        word_area = max(0, wx2 - wx1) * max(0, wy2 - wy1)
+        if word_area == 0:
+            continue
+        inter_x1 = max(wx1, px1)
+        inter_y1 = max(wy1, py1)
+        inter_x2 = min(wx2, px2)
+        inter_y2 = min(wy2, py2)
+        intersection = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+        if intersection / word_area >= contain_threshold:
+            result.append(word)
+    return result
+
+
+def sort_words_reading_order(
+    words: list[dict[str, Any]],
+    direction: str,
+) -> list[dict[str, Any]]:
+    """方向に応じて word を reading order でソートする純粋関数。
+
+    horizontal: 行（y 中心でクラスタリング）ごとに上→下、行内は x 昇順（左→右）。
+    vertical  : 列（x 中心でクラスタリング）ごとに右→左、列内は y 昇順（上→下）。
+
+    Args:
+        words: ソート対象の word dict リスト。
+        direction: "horizontal" または "vertical"。
+
+    Returns:
+        reading order でソートされた word dict リスト（元リストは変更しない）。
+    """
+    if not words:
+        return []
+
+    def _center(word: dict[str, Any]) -> tuple[float, float]:
+        pts = word.get("points", [])
+        if pts:
+            box = word_points_to_box(pts)
+            return ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+        return (0.0, 0.0)
+
+    if direction == "vertical":
+        # 右から左への列順（x 降順）、列内は y 昇順
+        return sorted(words, key=lambda w: (-_center(w)[0], _center(w)[1]))
+    else:
+        # 横書き: 行順（y 昇順）、行内は x 昇順
+        return sorted(words, key=lambda w: (_center(w)[1], _center(w)[0]))
+
+
+def select_words_inside_embedding(
+    sorted_words: list[dict[str, Any]],
+    embedding_box: tuple[int, int, int, int],
+    *,
+    overlap_threshold: float = 0.5,
+) -> tuple[list[dict[str, Any]], int]:
+    """reading-order ソート済み word 列のうち embedding bbox に重なる連続範囲を返す。
+
+    各 word の IoA（word_area 分母）が overlap_threshold 以上の word をマッチ対象とし、
+    その最小〜最大インデックスの連続範囲を採用する。範囲内に IoA ゼロの word があれば
+    「穴あき」とみなし空リストを返す（誤マッチ防止）。
+
+    Args:
+        sorted_words: reading order でソート済みの word dict リスト。
+        embedding_box: Pix2Text が検出した embedding bbox (x1, y1, x2, y2)。
+        overlap_threshold: word IoA の閾値。
+
+    Returns:
+        (selected_words, prefix_count)
+        selected_words: embedding bbox 内の連続 word リスト（空の場合はスキップ）。
+        prefix_count  : selected_words の先頭より前にある word の数。
+    """
+    ex1, ey1, ex2, ey2 = embedding_box
+    embed_area = max(0, ex2 - ex1) * max(0, ey2 - ey1)
+    if embed_area == 0:
+        return [], 0
+
+    match_indices: list[int] = []
+    for idx, word in enumerate(sorted_words):
+        pts = word.get("points", [])
+        if not pts:
+            continue
+        wx1, wy1, wx2, wy2 = word_points_to_box(pts)
+        word_area = max(0, wx2 - wx1) * max(0, wy2 - wy1)
+        if word_area == 0:
+            continue
+        inter_x1 = max(wx1, ex1)
+        inter_y1 = max(wy1, ey1)
+        inter_x2 = min(wx2, ex2)
+        inter_y2 = min(wy2, ey2)
+        intersection = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+        if intersection / word_area >= overlap_threshold:
+            match_indices.append(idx)
+
+    if not match_indices:
+        return [], 0
+
+    start_idx = min(match_indices)
+    end_idx = max(match_indices)
+    full_range = set(range(start_idx, end_idx + 1))
+
+    # 穴あき確認: 範囲内に IoA 閾値未満の word がある場合は空リストを返す
+    if full_range != set(match_indices):
+        return [], 0
+
+    return sorted_words[start_idx : end_idx + 1], start_idx
+
+
+def build_fragment(words: list[dict[str, Any]]) -> str:
+    """word.content を順に連結した fragment 文字列を返す純粋関数。
+
+    yomitoku は paragraph.contents = "\\n".join(word.contents) で生成し、
+    raw.md 出力時に "\\n" → "" と置換するため、word.content の連結が raw.md 内の
+    部分文字列に対応する。
+
+    Args:
+        words: 連結対象の word dict リスト。
+
+    Returns:
+        word.content を連結した文字列。
+    """
+    return "".join(w.get("content", "") for w in words)
+
+
 def math_detect(
     image: np.ndarray,
     analysis: PageAnalysis,
@@ -333,13 +487,10 @@ def math_detect(
     items: dict[Path, str] = {}
     roles: dict[Path, str] = {}
     originals: dict[Path, str] = {}
+    # paragraph インデックス → {word_contents, latex_spans の蓄積リスト}
+    inline_para_builders: dict[int, tuple[tuple[str, ...], list[tuple[int, int, str]]]] = {}
 
     for idx, detection in enumerate(detections):
-        # embedding（インライン数式）は段落全体置換できないためスキップ
-        # インライン数式の部分置換は将来の機能拡張で対応する
-        if detection.type == "embedding":
-            continue
-
         # yomitoku words で日本語ラベルを除外して bbox をトリミング
         trimmed_box = trim_bbox_by_japanese_words(detection.box, words)
         if trimmed_box is None:
@@ -372,17 +523,58 @@ def math_detect(
             )
             continue
 
-        # MathParagraph アダプタを作成して crop_math_image を再利用
-        pseudo_para = MathParagraph(
-            index=idx,
-            role=_TYPE_TO_ROLE.get(detection.type, "inline_formula"),
-            box=effective_box,
-            original_contents=str(matched_para["contents"]),
+        role = _TYPE_TO_ROLE.get(detection.type, "inline_formula")
+
+        if role == "inline_formula":
+            # paragraph 単位で word を集約し、embedding bbox に対応する span を登録
+            para_box_raw = matched_para["box"]
+            para_box = (
+                int(para_box_raw[0]),
+                int(para_box_raw[1]),
+                int(para_box_raw[2]),
+                int(para_box_raw[3]),
+            )
+            direction = str(matched_para.get("direction") or "horizontal")
+            para_words = collect_words_in_paragraph(para_box, words)
+            sorted_para_words = sort_words_reading_order(para_words, direction)
+            selected, prefix_count = select_words_inside_embedding(sorted_para_words, effective_box)
+            if not selected:
+                logger.warning(
+                    f"embedding bbox に重なる word が見つからないためスキップします: "
+                    f"box={effective_box} latex={effective_latex[:40]!r}"
+                )
+                continue
+
+            para_idx = paragraphs.index(matched_para)
+            word_contents = tuple(w.get("content", "") for w in sorted_para_words)
+            span = (prefix_count, prefix_count + len(selected), effective_latex)
+
+            if para_idx in inline_para_builders:
+                # 既存エントリに span を追加
+                existing_contents, existing_spans = inline_para_builders[para_idx]
+                inline_para_builders[para_idx] = (existing_contents, [*existing_spans, span])
+            else:
+                inline_para_builders[para_idx] = (word_contents, [span])
+        else:
+            # display_formula: 既存通り crop_math_image で登録
+            pseudo_para = MathParagraph(
+                index=idx,
+                role=role,
+                box=effective_box,
+                original_contents=str(matched_para["contents"]),
+            )
+            crop_path = crop_math_image(image, pseudo_para, math_dir)
+            items[crop_path] = effective_latex
+            roles[crop_path] = role
+            originals[crop_path] = str(matched_para["contents"])
+
+    # inline_para_builders を InlineParagraphReplacement に変換
+    inline_paragraphs: dict[int, InlineParagraphReplacement] = {
+        para_idx: InlineParagraphReplacement(
+            word_contents=word_contents,
+            latex_spans=tuple(sorted(spans, key=lambda s: s[0])),
         )
-        crop_path = crop_math_image(image, pseudo_para, math_dir)
+        for para_idx, (word_contents, spans) in inline_para_builders.items()
+    }
 
-        items[crop_path] = effective_latex
-        roles[crop_path] = _TYPE_TO_ROLE.get(detection.type, "inline_formula")
-        originals[crop_path] = str(matched_para["contents"])
-
-    return MathOverlay(items=items, roles=roles, originals=originals)
+    return MathOverlay(items=items, roles=roles, originals=originals, inline_paragraphs=inline_paragraphs)
