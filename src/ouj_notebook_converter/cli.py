@@ -2,6 +2,9 @@
 
 M1 では convert サブコマンドのみ実装する。
 M2 以降で resume / inspect を追加する予定。
+
+Note: シラバス連携（detect_via_syllabus）は内部実装済みだが、OUJ シラバス URL の
+解析方式が未確定のため --course-code オプションは現バージョンでは公開していない。
 """
 from __future__ import annotations
 
@@ -90,13 +93,6 @@ def convert(
         SplitMode,
         typer.Option("--split", help="出力分割モード: none / chapters"),
     ] = SplitMode.none,
-    course_code: Annotated[
-        str | None,
-        typer.Option(
-            "--course-code",
-            help="OUJ コースコード（--split chapters 用。シラバス検出に使用）",
-        ),
-    ] = None,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -153,9 +149,7 @@ def convert(
     if OutputFormat.md in effective_format:
         if split == SplitMode.chapters:
             try:
-                chapters = detect_chapters(
-                    input_pdf, page_markdowns, course_code=course_code
-                )
+                chapters = detect_chapters(input_pdf, page_markdowns)
             except ChapterDetectionError as e:
                 typer.echo(f"エラー: {e}", err=True)
                 raise typer.Exit(code=2) from e

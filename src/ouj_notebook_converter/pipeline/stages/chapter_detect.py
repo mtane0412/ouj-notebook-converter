@@ -29,20 +29,28 @@ _KANJI_TO_INT: dict[str, int] = {
 }
 
 # 章見出しパターン（H1 見出し冒頭にマッチ）
+# 従来形式: 「第N章 タイトル」
 _CHAPTER_PATTERN = re.compile(
     r"^#\s+第\s*([０-９0-9一二三四五六七八九十]+)\s*章\s*(.*)$",
     re.MULTILINE,
 )
+# OUJ 実書籍 OCR 出力形式: 「Nタイトル」（数字直結）
+# 除外: ピリオド・スペース・数字・バックスラッシュ・閉じ括弧で始まる場合（セクション見出し等）
+_CHAPTER_NUM_DIRECT_PATTERN = re.compile(
+    r"^#\s+([1-9][0-9]?)([^\d\.\s\\\)].*)$",
+    re.MULTILINE,
+)
+# OCR 由来の末尾数字（ページ番号等）を許容するため [\d\s]*$ で終端する
 _PREFACE_PATTERN = re.compile(
-    r"^#\s+(まえがき|前書き|はじめに|序章|序論|はしがき)\b",
+    r"^#\s+(まえがき|前書き|はじめに|序章|序論|はしがき)[\d\s]*$",
     re.MULTILINE,
 )
 _AFTERWORD_PATTERN = re.compile(
-    r"^#\s+(あとがき|後書き|おわりに|終章|結論|むすび)\b",
+    r"^#\s+(あとがき|後書き|おわりに|終章|結論|むすび)[\d\s]*$",
     re.MULTILINE,
 )
 _INDEX_PATTERN = re.compile(
-    r"^#\s+(索引|インデックス)\b",
+    r"^#\s+(索引|インデックス)[\d\s]*$",
     re.MULTILINE,
 )
 
@@ -284,6 +292,8 @@ def detect_via_ocr_toc(
 ) -> list[ChapterSpec]:
     """先頭付近の「目次」ページを特定し、章エントリとページ番号を抽出して章境界を返す。
 
+    「# 目次」見出し形式と「# NTitle」形式（OUJ 実書籍）の両方に対応する。
+
     Args:
         page_markdowns: OCR 済み全ページの PageMarkdown リスト。
 
@@ -298,7 +308,8 @@ def detect_via_ocr_toc(
             break
 
     if toc_page is None:
-        raise ChapterDetectionError("目次ページが見つかりませんでした（先頭 15 ページ以内）。")
+        # 「# 目次」形式が見つからない場合は # NTitle 形式（OUJ 実書籍）を試みる
+        return _detect_via_ntitle_toc(page_markdowns)
 
     # 目次エントリ: 「第N章 タイトル .... ページ番号」形式を解析する
     entry_pattern = re.compile(
@@ -332,6 +343,121 @@ def detect_via_ocr_toc(
         raise ChapterDetectionError("目次エントリを PDF ページに対応付けられませんでした。")
 
     return _build_chapter_specs(raw_specs, total_pages, source="ocr_toc")
+
+
+def _detect_via_ntitle_toc(
+    page_markdowns: list[PageMarkdown],
+) -> list[ChapterSpec]:
+    """# NTitle 形式の目次ページ群から章境界を検出する（OUJ 実書籍形式）。
+
+    OUJ 実書籍の OCR 出力は「# 目次」見出しを持たず、複数の章見出しを
+    1 ページに列挙する形式を使う。先頭 15 ページ以内でそのようなページを探す。
+
+    Raises:
+        ChapterDetectionError: 目次ページが見つからない / エントリ抽出に失敗した場合。
+    """
+    ntitle_pages = [
+        p for p in page_markdowns[:15]
+        if _has_multiple_chapter_headings(p.markdown)
+    ]
+    if not ntitle_pages:
+        raise ChapterDetectionError("目次ページが見つかりませんでした（先頭 15 ページ以内）。")
+
+    combined_text = "\n".join(p.markdown for p in ntitle_pages)
+    all_entries = _parse_ntitle_toc_entries(combined_text)
+
+    if not all_entries:
+        raise ChapterDetectionError("目次ページからエントリを抽出できませんでした。")
+
+    # オフセット計算: CHAPTER エントリを使って book_page → page_index の変換係数を求める
+    chapter_entries: list[tuple[int, str, int]] = [
+        (num if num is not None else 0, title, book_page)
+        for kind, num, title, book_page in all_entries
+        if kind == ChapterKind.CHAPTER
+    ]
+    first_toc_page_index = ntitle_pages[0].page_index
+    if chapter_entries:
+        offset = _estimate_page_offset(first_toc_page_index, chapter_entries, page_markdowns)
+    else:
+        offset = first_toc_page_index + 1
+
+    total_pages = len(page_markdowns)
+    raw_specs: list[tuple[ChapterKind, int | None, str, int]] = []
+    for kind, num, title, book_page in all_entries:
+        page_index = max(0, book_page - 1 + offset)
+        if page_index < total_pages:
+            raw_specs.append((kind, num, title, page_index))
+
+    if not raw_specs:
+        raise ChapterDetectionError("目次エントリを PDF ページに対応付けられませんでした。")
+
+    return _build_chapter_specs(raw_specs, total_pages, source="ocr_toc")
+
+
+def _find_first_section_page_number(lines: list[str]) -> int | None:
+    """後続行のセクションエントリから最初のページ番号を抽出する。
+
+    「1. テキスト<ページ番号>」形式の行を探し、末尾の数字を返す。
+    次の章見出し（# で始まる行）が出現したら探索を終了する。
+    """
+    section_pattern = re.compile(r"^\d+\.\s+.+?(\d+)\s*$")
+    for line in lines:
+        if re.match(r"^#\s+", line):
+            break
+        m = section_pattern.match(line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _parse_ntitle_toc_entries(
+    combined_text: str,
+) -> list[tuple[ChapterKind, int | None, str, int]]:
+    """# NTitle 形式の目次テキストから章エントリを抽出する。
+
+    対応形式:
+    - 前書き: ``# まえがき3`` → PREFACE, book_page=3
+    - 章（末尾ページ番号あり）: ``# 3ファイルの読み込みとデータフレーム 43``
+      → CHAPTER num=3, book_page=43
+    - 章（末尾ページ番号なし）: ``# 1Rと RStudio の基本操作`` → 直後のセクションエントリを参照
+      ``1. R と RStudio9`` → CHAPTER num=1, book_page=9
+
+    Returns:
+        (kind, chapter_number, title, book_page) のリスト。
+    """
+    entries: list[tuple[ChapterKind, int | None, str, int]] = []
+    lines = combined_text.splitlines()
+
+    # 前書きパターン: # まえがきN（末尾数字がページ番号）
+    preface_pattern = re.compile(
+        r"^#\s+(まえがき|前書き|はじめに|序章|序論|はしがき)\s*(\d+)\s*$"
+    )
+    # 章パターン: # NTitle [trailing_page]
+    # 除外: ピリオド・スペース・数字・バックスラッシュ・閉じ括弧で始まる場合
+    chapter_pattern = re.compile(
+        r"^#\s+([1-9][0-9]?)([^\d\.\s\\\)].+?)(?:\s+(\d+))?\s*$"
+    )
+
+    for i, line in enumerate(lines):
+        m = preface_pattern.match(line)
+        if m:
+            entries.append((ChapterKind.PREFACE, None, m.group(1), int(m.group(2))))
+            continue
+
+        m = chapter_pattern.match(line)
+        if m:
+            num = _parse_chapter_number(m.group(1))
+            title = m.group(2).strip()
+            trailing_page = m.group(3)
+            book_page: int | None
+            if trailing_page:
+                book_page = int(trailing_page)
+            else:
+                book_page = _find_first_section_page_number(lines[i + 1 :])
+            if book_page is not None:
+                entries.append((ChapterKind.CHAPTER, num, title, book_page))
+
+    return entries
 
 
 def _estimate_page_offset(
@@ -385,6 +511,10 @@ def detect_via_body_headings(
         if first_h1 is None:
             continue
 
+        # 複数の章見出しを含むページは目次などのリストページとして除外する
+        if _has_multiple_chapter_headings(page.markdown):
+            continue
+
         kind, num = _classify_heading(first_h1)
         if kind is None:
             continue
@@ -399,6 +529,27 @@ def detect_via_body_headings(
 
     total_pages = len(page_markdowns)
     return _build_chapter_specs(raw_specs, total_pages, source="body_headings")
+
+
+_CHAPTER_H1_COUNT_PATTERN = re.compile(
+    r"^#\s+(?:"
+    r"第\s*[０-９0-9一二三四五六七八九十]+\s*章"      # 「第N章」形式
+    r"|[1-9][0-9]?[^\d\.\s\\\)]"                        # 「Nタイトル」形式（数字直結）
+    r"|まえがき|前書き|はじめに|序章|序論|はしがき"        # 前書き系
+    r"|あとがき|後書き|おわりに|終章|結論|むすび"          # 後書き系
+    r"|索引|インデックス"                                  # 索引
+    r")",
+    re.MULTILINE,
+)
+
+
+def _has_multiple_chapter_headings(markdown: str) -> bool:
+    """Markdown テキストに章見出しが 2 つ以上含まれる場合 True を返す。
+
+    目次ページは複数の章見出しを列挙するため、これを検出して除外するために使用する。
+    セクション見出し（# N.形式）や表見出しはカウントしない。
+    """
+    return len(_CHAPTER_H1_COUNT_PATTERN.findall(markdown)) > 1
 
 
 def _extract_first_h1(markdown: str) -> str | None:
@@ -425,6 +576,12 @@ def _classify_heading(text: str) -> tuple[ChapterKind | None, int | None]:
         非対象の見出しの場合は (None, None)。
     """
     m = _CHAPTER_PATTERN.match(f"# {text}")
+    if m:
+        num = _parse_chapter_number(m.group(1))
+        return ChapterKind.CHAPTER, num
+
+    # OUJ 実書籍 OCR 出力形式（「第N章」なし、数字直結）
+    m = _CHAPTER_NUM_DIRECT_PATTERN.match(f"# {text}")
     if m:
         num = _parse_chapter_number(m.group(1))
         return ChapterKind.CHAPTER, num
@@ -462,14 +619,20 @@ def _clean_title(heading_text: str, kind: ChapterKind, chapter_number: int | Non
     text = heading_text.strip()
 
     if kind == ChapterKind.CHAPTER:
-        # 「第N章 タイトル」→「タイトル」
+        # 「第N章 タイトル」形式（従来形式）→「タイトル」
         cleaned = re.sub(
             r"^第\s*[０-９0-9一二三四五六七八九十]+\s*章\s*", "", text
         ).strip()
+        if cleaned != text:
+            return cleaned if cleaned else text
+
+        # 「Nタイトル」形式（OUJ 実書籍 OCR 出力）→「タイトル」
+        # 先頭の 1〜2 桁アラビア数字を除去する（次の文字が非数字の場合のみ）
+        cleaned = re.sub(r"^[1-9][0-9]?(?=\D)", "", text).strip()
         return cleaned if cleaned else text
 
-    # PREFACE / AFTERWORD / INDEX はそのまま返す
-    return text
+    # PREFACE / AFTERWORD / INDEX: OCR 由来の末尾数字（ページ番号等）を除去する
+    return re.sub(r"[\d\s]+$", "", text).strip() or text
 
 
 def _build_chapter_specs(

@@ -97,3 +97,107 @@ class TestDetectViaOcrToc:
 
         chapters = detect_via_ocr_toc(pages)
         assert all(c.source == "ocr_toc" for c in chapters)
+
+
+# OUJ 実書籍形式の目次ページ (# 目次 見出しなし、# NTitle 形式で章を列挙)
+_TOC_PAGE_NTITLE_1 = """\
+# まえがき3
+
+# 1Rと RStudio の基本操作
+
+1. R と RStudio9
+
+2. R の基本操作10
+
+# 2R を用いた行列の計算
+
+1. 記述統計量25
+
+# 3ファイルの読み込みとデータフレーム 43
+
+1. データフレームとファイルの読み込み43
+"""
+
+_TOC_PAGE_NTITLE_2 = """\
+# 4データの視覚化
+
+1. 散布図60
+
+# 5確率分布
+
+1. 確率分布81
+
+60
+
+81
+"""
+
+
+class TestDetectViaOcrTocNTitle形式:
+    """OUJ 実書籍形式: # 目次 見出しなし、# NTitle 形式で章を列挙する目次。"""
+
+    def test_NTitle形式のTOCページから章を検出できる(self) -> None:
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            _make_page(1, _TOC_PAGE_NTITLE_2),
+            *[_make_page(i + 2, "本文") for i in range(100)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        numbers = sorted(
+            c.chapter_number for c in chapters if c.kind == ChapterKind.CHAPTER
+        )
+        assert 1 in numbers
+        assert 2 in numbers
+        assert 3 in numbers
+        assert 4 in numbers
+        assert 5 in numbers
+
+    def test_NTitle形式から章タイトルが取得される(self) -> None:
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            *[_make_page(i + 1, "本文") for i in range(50)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        ch1 = next((c for c in chapters if c.chapter_number == 1), None)
+        assert ch1 is not None
+        assert ch1.title == "Rと RStudio の基本操作"
+
+    def test_NTitle形式から章開始ページが取得される(self) -> None:
+        """# NTitle 形式の目次: 最初の節エントリのページ番号が章開始ページになる。"""
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            *[_make_page(i + 1, "本文") for i in range(50)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        ch1 = next((c for c in chapters if c.chapter_number == 1), None)
+        assert ch1 is not None
+        assert ch1.start_page_index == 9  # 節エントリ「R と RStudio9」のページ番号
+
+    def test_NTitle形式で見出し末尾のページ番号が使われる(self) -> None:
+        """# 3ファイルの読み込みとデータフレーム 43 のように見出し末尾に番号がある場合。"""
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            *[_make_page(i + 1, "本文") for i in range(50)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        ch3 = next((c for c in chapters if c.chapter_number == 3), None)
+        assert ch3 is not None
+        assert ch3.start_page_index == 43  # 見出し末尾の「43」
+
+    def test_NTitle形式でまえがきが検出される(self) -> None:
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            *[_make_page(i + 1, "本文") for i in range(50)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        prefaces = [c for c in chapters if c.kind == ChapterKind.PREFACE]
+        assert len(prefaces) == 1
+        assert prefaces[0].start_page_index == 3  # まえがき3 → ページ3
+
+    def test_NTitle形式のsourceはocr_toc(self) -> None:
+        pages = [
+            _make_page(0, _TOC_PAGE_NTITLE_1),
+            *[_make_page(i + 1, "本文") for i in range(50)],
+        ]
+        chapters = detect_via_ocr_toc(pages)
+        assert all(c.source == "ocr_toc" for c in chapters)
