@@ -425,6 +425,54 @@ def select_words_inside_embedding(
     return sorted_words[start_idx : end_idx + 1], start_idx
 
 
+def match_contents_to_words(
+    contents: str,
+    para_words: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """paragraph.contents の各行（= 1 word）に bbox を割り当て、reading order 済み dict リストを返す。
+
+    yomitoku は paragraph.contents = "\\n".join(word.content for word in reading_order_words)
+    で生成するため、split("\\n") の各行が yomitoku の reading order での 1 word.content に対応する。
+
+    sort_words_reading_order より正確：行の y 座標のばらつきに依存せず、
+    yomitoku が実際に採用した reading order を再現する。
+
+    同一 content の word が複数ある場合は使用済みインデックスを追跡して順に消費する。
+    対応する word が見つからない行は content のみで box なし（bbox は None 相当）の
+    dict として返す（bbox なしは select_words_inside_embedding でスキップされる）。
+
+    Args:
+        contents: matched_para["contents"]（yomitoku 生成の reading order 済みテキスト）。
+        para_words: paragraph 内の word dict リスト（collect_words_in_paragraph の結果）。
+
+    Returns:
+        (content, points) を持つ dict リスト（reading order 順）。
+        points が取得できない場合は空リストを持つ。
+    """
+    lines = [line for line in contents.split("\n") if line]
+
+    # content → word dict リスト（同一 content に複数 word がある場合の重複対応）
+    content_to_words: dict[str, list[dict[str, Any]]] = {}
+    for w in para_words:
+        c = w.get("content", "")
+        content_to_words.setdefault(c, []).append(w)
+
+    content_used: dict[str, int] = {}
+    result: list[dict[str, Any]] = []
+    for line in lines:
+        used_count = content_used.get(line, 0)
+        candidates = content_to_words.get(line, [])
+        if used_count < len(candidates):
+            word = candidates[used_count]
+            content_used[line] = used_count + 1
+            result.append(word)
+        else:
+            # 対応する word が見つからない場合は content のみの空 dict（bbox なし）
+            result.append({"content": line, "points": []})
+
+    return result
+
+
 def build_fragment(words: list[dict[str, Any]]) -> str:
     """word.content を順に連結した fragment 文字列を返す純粋関数。
 
@@ -534,10 +582,14 @@ def math_detect(
                 int(para_box_raw[2]),
                 int(para_box_raw[3]),
             )
-            direction = str(matched_para.get("direction") or "horizontal")
             para_words = collect_words_in_paragraph(para_box, words)
-            sorted_para_words = sort_words_reading_order(para_words, direction)
-            selected, prefix_count = select_words_inside_embedding(sorted_para_words, effective_box)
+            # paragraph.contents の行順が yomitoku の actual reading order を正確に反映する
+            # sort_words_reading_order の代わりに match_contents_to_words を使う
+            # （同一行の word 間で y 座標のばらつきがあってもソート逆転が起きない）
+            ordered_para_words = match_contents_to_words(
+                str(matched_para.get("contents") or ""), para_words
+            )
+            selected, prefix_count = select_words_inside_embedding(ordered_para_words, effective_box)
             if not selected:
                 logger.warning(
                     f"embedding bbox に重なる word が見つからないためスキップします: "
@@ -546,7 +598,7 @@ def math_detect(
                 continue
 
             para_idx = paragraphs.index(matched_para)
-            word_contents = tuple(w.get("content", "") for w in sorted_para_words)
+            word_contents = tuple(w.get("content", "") for w in ordered_para_words)
             span = (prefix_count, prefix_count + len(selected), effective_latex)
 
             if para_idx in inline_para_builders:

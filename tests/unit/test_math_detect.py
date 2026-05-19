@@ -17,6 +17,7 @@ from ouj_notebook_converter.pipeline.stages.math_detect import (
     ioa,
     iou,
     is_japanese_text,
+    match_contents_to_words,
     match_paragraph_by_ioa,
     math_detect,
     select_words_inside_embedding,
@@ -703,6 +704,52 @@ class TestSelectWordsInsideEmbedding:
         assert len(selected) == 3
 
 
+class TestMatchContentsToWords:
+    """match_contents_to_words: paragraph.contents 行順に word を対応付ける。"""
+
+    def test_contents行順にwordを返す(self) -> None:
+        # paragraph.contents = "z\nは実数" → ["z", "は実数"] の順で word を返す
+        # analysis.json の words は別の順（y 座標が微小に異なる）にあっても正しく対応
+        contents = "z\nは実数"
+        para_words = [
+            # y 座標が微小に異なるため sort_words_reading_order では逆順になりうる
+            _make_word_dict(45, 1, 200, 20, "は実数"),  # わずかに y が小さい（上方向）
+            _make_word_dict(0, 2, 40, 21, "z"),          # わずかに y が大きい（下方向）
+        ]
+        result = match_contents_to_words(contents, para_words)
+        assert [w.get("content") for w in result] == ["z", "は実数"]
+
+    def test_同一contentが複数ある場合は順に消費される(self) -> None:
+        # paragraph.contents に同じ word が複数回出現する場合は bbox 別の word を消費する
+        contents = "x\ny\nx"  # "x" が 2 回出現
+        words = [
+            _make_word_dict(0, 0, 10, 10, "x"),    # 1 つ目の "x"
+            _make_word_dict(15, 0, 25, 10, "y"),
+            _make_word_dict(30, 0, 40, 10, "x"),   # 2 つ目の "x"
+        ]
+        result = match_contents_to_words(contents, words)
+        assert [w.get("content") for w in result] == ["x", "y", "x"]
+        # 1 つ目と 2 つ目の "x" は別 word（points が異なる）
+        assert result[0]["points"] != result[2]["points"]
+
+    def test_対応するwordがない行はpoints空のdictを返す(self) -> None:
+        contents = "既知テキスト\n未対応テキスト"
+        words = [
+            _make_word_dict(0, 0, 50, 20, "既知テキスト"),
+            # "未対応テキスト" の word は存在しない
+        ]
+        result = match_contents_to_words(contents, words)
+        assert len(result) == 2
+        assert result[0].get("content") == "既知テキスト"
+        assert result[0].get("points") != []
+        assert result[1].get("content") == "未対応テキスト"
+        assert result[1].get("points") == []  # bbox なし
+
+    def test_空contentsは空リストを返す(self) -> None:
+        result = match_contents_to_words("", [])
+        assert result == []
+
+
 class TestBuildFragment:
     """build_fragment: word.content を順に連結する純粋関数。"""
 
@@ -734,8 +781,10 @@ class TestMathDetectEmbedding:
         self, tmp_path: Path, mocker: MagicMock
     ) -> None:
         # embedding（インライン数式）が inline_paragraphs に登録される
+        # yomitoku は paragraph.contents = "\n".join(word.content) で生成するため
+        # 各 word.content が "\n" で区切られた形式にする
         paragraphs = [
-            {"box": [0, 0, 200, 50], "contents": "zは実数", "direction": "horizontal", "role": None, "order": 0},
+            {"box": [0, 0, 200, 50], "contents": "z\nは実数", "direction": "horizontal", "role": None, "order": 0},
         ]
         words = [
             _make_word_dict(0, 0, 40, 50, "z"),
@@ -787,8 +836,9 @@ class TestMathDetectEmbedding:
         self, tmp_path: Path, mocker: MagicMock
     ) -> None:
         # paragraph 内に embedding が 2 件ある場合、inline_paragraphs のエントリは 1 件
+        # yomitoku は paragraph.contents = "\n".join(word.content) で生成するため "\n" 区切り
         paragraphs = [
-            {"box": [0, 0, 300, 50], "contents": "zとwは実数", "direction": "horizontal", "role": None, "order": 0},
+            {"box": [0, 0, 300, 50], "contents": "z\nと\nw\nは実数", "direction": "horizontal", "role": None, "order": 0},
         ]
         words = [
             _make_word_dict(0, 0, 40, 50, "z"),
@@ -821,7 +871,8 @@ class TestMathDetectEmbedding:
     ) -> None:
         # isolated は items / roles / originals に、embedding は inline_paragraphs に登録される
         paragraphs = [
-            {"box": [0, 0, 100, 50], "contents": "z is real", "direction": "horizontal", "role": None, "order": 0},
+            # yomitoku は paragraph.contents = "\n".join(word.content) で生成
+            {"box": [0, 0, 100, 50], "contents": "z", "direction": "horizontal", "role": None, "order": 0},
             {"box": [0, 60, 100, 110], "contents": "ディスプレイ数式", "direction": "horizontal", "role": None, "order": 1},
         ]
         words = [
