@@ -81,7 +81,7 @@ class Pix2TextHttpDetector:
         try:
             data: dict[str, Any] = response.json()
             return (str(data["latex"]).strip(), float(data["score"]))
-        except (ValueError, KeyError) as e:
+        except (TypeError, ValueError, KeyError) as e:
             raise MathEngineError(
                 f"Pix2Text API レスポンスをパースできません: {response.text!r}"
             ) from e
@@ -107,7 +107,7 @@ class Pix2TextHttpDetector:
 
         try:
             raw_list: list[dict[str, Any]] = response.json()
-        except (ValueError, KeyError) as e:
+        except (TypeError, ValueError, KeyError) as e:
             raise MathEngineError(
                 f"Pix2Text API レスポンスをパースできません: {response.text!r}"
             ) from e

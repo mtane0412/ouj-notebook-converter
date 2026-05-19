@@ -179,6 +179,8 @@ def _save_trimmed_crop(
     y1 = max(0, min(y1, h))
     x2 = max(0, min(x2, w))
     y2 = max(0, min(y2, h))
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"クランプ後に空クロップになりました: box=({x1},{y1},{x2},{y2})")
     # BGR → RGB に変換して PIL で保存
     rgb = image[y1:y2, x1:x2, ::-1]
     out_path = output_dir / f"{idx:04d}_trimmed.png"
@@ -352,10 +354,12 @@ def math_detect(
             trimmed_crop_path = _save_trimmed_crop(image, trimmed_box, math_dir, idx)
             try:
                 effective_latex, _ = recognizer.recognize_image(trimmed_crop_path)
-            except MathEngineError as e:
+            except (MathEngineError, ValueError, OSError) as e:
                 logger.warning(f"再認識に失敗したため元の LaTeX を使用します: {e}")
                 effective_latex = detection.latex
-            effective_box = trimmed_box
+                effective_box = detection.box
+            else:
+                effective_box = trimmed_box
         else:
             effective_box = detection.box
             effective_latex = detection.latex
