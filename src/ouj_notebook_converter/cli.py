@@ -2,6 +2,9 @@
 
 M1 では convert サブコマンドのみ実装する。
 M2 以降で resume / inspect を追加する予定。
+
+Note: シラバス連携（detect_via_syllabus）は内部実装済みだが、OUJ シラバス URL の
+解析方式が未確定のため --course-code オプションは現バージョンでは公開していない。
 """
 from __future__ import annotations
 
@@ -10,6 +13,19 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+
+from ouj_notebook_converter.exporters.markdown import (
+    export_markdown,
+    export_markdown_by_chapters,
+)
+from ouj_notebook_converter.pipeline.runner import ConvertConfig, run_pages
+from ouj_notebook_converter.pipeline.stages.chapter_detect import (
+    ChapterDetectionError,
+    detect_chapters,
+)
+from ouj_notebook_converter.pipeline.stages.load import load_pdf_pages
+from ouj_notebook_converter.pipeline.stages.ocr import create_analyzer
+from ouj_notebook_converter.utils.pages import parse_page_range
 
 app = typer.Typer(
     name="ounc",
@@ -34,6 +50,12 @@ class ReadingOrder(str, Enum):
     left2right = "left2right"
     right2left = "right2left"
     top2bottom = "top2bottom"
+
+
+class SplitMode(str, Enum):
+    """出力ファイルの分割モード。"""
+    none = "none"        # デフォルト（--combine / --no-combine に従う）
+    chapters = "chapters"  # 章ごとに分割
 
 
 @app.command()
@@ -67,6 +89,10 @@ def convert(
     ignore_meta: Annotated[
         bool, typer.Option("--ignore-meta/--no-ignore-meta", help="ヘッダ/フッタを除外")
     ] = True,
+    split: Annotated[
+        SplitMode,
+        typer.Option("--split", help="出力分割モード: none / chapters"),
+    ] = SplitMode.none,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -85,17 +111,6 @@ def convert(
             err=True,
         )
         raise typer.Exit(code=1)
-
-    # --- 変換処理（yomitoku が必要）---
-    try:
-        from ouj_notebook_converter.exporters.markdown import export_markdown
-        from ouj_notebook_converter.pipeline.runner import ConvertConfig, run_pages
-        from ouj_notebook_converter.pipeline.stages.load import load_pdf_pages
-        from ouj_notebook_converter.pipeline.stages.ocr import create_analyzer
-        from ouj_notebook_converter.utils.pages import parse_page_range
-    except ImportError as e:
-        typer.echo(f"エラー: 必要なモジュールのインポートに失敗しました。\n{e}", err=True)
-        raise typer.Exit(code=1) from e
 
     effective_cache_dir = cache_dir or (outdir / ".cache")
 
@@ -132,10 +147,26 @@ def convert(
     effective_format = format or [OutputFormat.md]
 
     if OutputFormat.md in effective_format:
-        out_path = outdir / f"{book_name}.md" if combine else outdir / book_name
-        export_markdown(page_markdowns, out_path, assets_dir, combine=combine)
-        if verbose:
-            typer.echo(f"Markdown 出力: {out_path}")
+        if split == SplitMode.chapters:
+            try:
+                chapters = detect_chapters(input_pdf, page_markdowns)
+            except ChapterDetectionError as e:
+                typer.echo(f"エラー: {e}", err=True)
+                raise typer.Exit(code=2) from e
+
+            chapter_dir = outdir / book_name
+            written = export_markdown_by_chapters(
+                page_markdowns, chapters, chapter_dir, assets_dir
+            )
+            if verbose:
+                typer.echo(
+                    f"章分割 Markdown 出力: {chapter_dir} ({len(written)} ファイル)"
+                )
+        else:
+            out_path = outdir / f"{book_name}.md" if combine else outdir / book_name
+            export_markdown(page_markdowns, out_path, assets_dir, combine=combine)
+            if verbose:
+                typer.echo(f"Markdown 出力: {out_path}")
 
     typer.echo("変換が完了しました。")
 
