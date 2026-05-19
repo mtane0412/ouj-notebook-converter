@@ -1,4 +1,5 @@
 """仕様: ページ範囲文字列（"1,3-5,10" 形式）を整数リストにパースするユーティリティ。"""
+
 from __future__ import annotations
 
 
@@ -35,9 +36,7 @@ def parse_page_range(spec: str | None, *, total: int) -> list[int]:
             if start < 1:
                 raise ValueError(f"ページ番号は1以上でなければなりません: '{token}'")
             if end > total:
-                raise ValueError(
-                    f"ページ番号 {end} が total={total} を超えています: '{token}'"
-                )
+                raise ValueError(f"ページ番号 {end} が total={total} を超えています: '{token}'")
             pages.update(range(start, end + 1))
         else:
             try:
@@ -47,9 +46,7 @@ def parse_page_range(spec: str | None, *, total: int) -> list[int]:
             if page < 1:
                 raise ValueError(f"ページ番号は1以上でなければなりません: '{token}'")
             if page > total:
-                raise ValueError(
-                    f"ページ番号 {page} が total={total} を超えています: '{token}'"
-                )
+                raise ValueError(f"ページ番号 {page} が total={total} を超えています: '{token}'")
             pages.add(page)
 
     return sorted(pages)

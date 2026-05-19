@@ -6,6 +6,7 @@
 各 detect_via_* 関数は失敗時に ChapterDetectionError を送出する。
 暗黙のフォールバック・NOP は禁止。
 """
+
 from __future__ import annotations
 
 import re
@@ -23,9 +24,21 @@ _FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789"
 
 # 漢数字 → アラビア数字のマッピング（1〜15 の範囲を想定）
 _KANJI_TO_INT: dict[str, int] = {
-    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
-    "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "十一": 11,
+    "十二": 12,
+    "十三": 13,
+    "十四": 14,
+    "十五": 15,
 }
 
 # 章見出しパターン（H1 見出し冒頭にマッチ）
@@ -243,6 +256,7 @@ def _get_pdfium() -> object:
     """pypdfium2 モジュールを返す。テスト時はモンキーパッチで差し替え可能。"""
     try:
         import pypdfium2 as pdfium
+
         return pdfium
     except ImportError as e:
         raise ChapterDetectionError("pypdfium2 が未インストールです。") from e
@@ -356,10 +370,7 @@ def _detect_via_ntitle_toc(
     Raises:
         ChapterDetectionError: 目次ページが見つからない / エントリ抽出に失敗した場合。
     """
-    ntitle_pages = [
-        p for p in page_markdowns[:15]
-        if _has_multiple_chapter_headings(p.markdown)
-    ]
+    ntitle_pages = [p for p in page_markdowns[:15] if _has_multiple_chapter_headings(p.markdown)]
     if not ntitle_pages:
         raise ChapterDetectionError("目次ページが見つかりませんでした（先頭 15 ページ以内）。")
 
@@ -429,14 +440,10 @@ def _parse_ntitle_toc_entries(
     lines = combined_text.splitlines()
 
     # 前書きパターン: # まえがきN（末尾数字がページ番号）
-    preface_pattern = re.compile(
-        r"^#\s+(まえがき|前書き|はじめに|序章|序論|はしがき)\s*(\d+)\s*$"
-    )
+    preface_pattern = re.compile(r"^#\s+(まえがき|前書き|はじめに|序章|序論|はしがき)\s*(\d+)\s*$")
     # 章パターン: # NTitle [trailing_page]
     # 除外: ピリオド・スペース・数字・バックスラッシュ・閉じ括弧で始まる場合
-    chapter_pattern = re.compile(
-        r"^#\s+([1-9][0-9]?)([^\d\.\s\\\)].+?)(?:\s+(\d+))?\s*$"
-    )
+    chapter_pattern = re.compile(r"^#\s+([1-9][0-9]?)([^\d\.\s\\\)].+?)(?:\s+(\d+))?\s*$")
 
     for i, line in enumerate(lines):
         m = preface_pattern.match(line)
@@ -475,8 +482,7 @@ def _estimate_page_offset(
     try:
         body_chapters = detect_via_body_headings(page_markdowns)
         first_chapter_specs = [
-            c for c in body_chapters
-            if c.kind == ChapterKind.CHAPTER and c.chapter_number == 1
+            c for c in body_chapters if c.kind == ChapterKind.CHAPTER and c.chapter_number == 1
         ]
         if first_chapter_specs:
             first_chapter_page_index = first_chapter_specs[0].start_page_index
@@ -533,11 +539,11 @@ def detect_via_body_headings(
 
 _CHAPTER_H1_COUNT_PATTERN = re.compile(
     r"^#\s+(?:"
-    r"第\s*[０-９0-9一二三四五六七八九十]+\s*章"      # 「第N章」形式
-    r"|[1-9][0-9]?[^\d\.\s\\\)]"                        # 「Nタイトル」形式（数字直結）
-    r"|まえがき|前書き|はじめに|序章|序論|はしがき"        # 前書き系
-    r"|あとがき|後書き|おわりに|終章|結論|むすび"          # 後書き系
-    r"|索引|インデックス"                                  # 索引
+    r"第\s*[０-９0-9一二三四五六七八九十]+\s*章"  # 「第N章」形式
+    r"|[1-9][0-9]?[^\d\.\s\\\)]"  # 「Nタイトル」形式（数字直結）
+    r"|まえがき|前書き|はじめに|序章|序論|はしがき"  # 前書き系
+    r"|あとがき|後書き|おわりに|終章|結論|むすび"  # 後書き系
+    r"|索引|インデックス"  # 索引
     r")",
     re.MULTILINE,
 )
@@ -620,9 +626,7 @@ def _clean_title(heading_text: str, kind: ChapterKind, chapter_number: int | Non
 
     if kind == ChapterKind.CHAPTER:
         # 「第N章 タイトル」形式（従来形式）→「タイトル」
-        cleaned = re.sub(
-            r"^第\s*[０-９0-9一二三四五六七八九十]+\s*章\s*", "", text
-        ).strip()
+        cleaned = re.sub(r"^第\s*[０-９0-9一二三四五六七八九十]+\s*章\s*", "", text).strip()
         if cleaned != text:
             return cleaned if cleaned else text
 

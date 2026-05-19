@@ -3,6 +3,7 @@
 pypdfium2 の PdfDocument.get_toc() で PDF のしおりを読んで章境界を検出することを検証する。
 reportlab でテスト用 PDF を合成し、pypdfium2 で読み直すシンプルなアプローチ。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,6 +24,7 @@ def _make_page(page_index: int, markdown: str = "") -> PageMarkdown:
 
 class FakeTocItem(NamedTuple):
     """pypdfium2 の TOC アイテムを模したフェイク。"""
+
     title: str | None
     page_index: int | None  # 1-origin
     level: int = 0
@@ -103,7 +105,7 @@ class TestDetectViaPdfToc:
             [c for c in chapters if c.kind == ChapterKind.CHAPTER],
             key=lambda c: c.chapter_number or 0,
         )
-        assert chapter_items[0].start_page_index == 0   # page_index=1 → 0-origin
+        assert chapter_items[0].start_page_index == 0  # page_index=1 → 0-origin
         assert chapter_items[0].end_page_index == 4
         assert chapter_items[1].start_page_index == 5
         assert chapter_items[1].end_page_index == 9
@@ -136,9 +138,7 @@ class TestDetectViaPdfToc:
         with pytest.raises(ChapterDetectionError):
             detect_via_pdf_toc(dummy_pdf, pages)
 
-    def test_sourceはpdf_toc(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_sourceはpdf_toc(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         toc = [FakeTocItem(title="第1章 データとは何か", page_index=1)]
         _patch_pdfium(monkeypatch, toc)
 

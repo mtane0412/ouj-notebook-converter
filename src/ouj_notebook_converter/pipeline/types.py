@@ -4,6 +4,7 @@
 - I/O は持たない（pure data）。
 - ページ番号は 0-origin（PDF の内部インデックスに合わせる）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,9 +17,9 @@ class PageJob:
     """1 ページ分の処理単位。パイプラインへの入力情報を保持する。"""
 
     pdf_path: Path
-    page_index: int       # 0-origin
+    page_index: int  # 0-origin
     dpi: int
-    cache_key: str        # SHA-256 ハッシュ（cache/key.py が算出）
+    cache_key: str  # SHA-256 ハッシュ（cache/key.py が算出）
 
 
 @dataclass(frozen=True)
@@ -30,19 +31,23 @@ class PageAnalysis:
     """
 
     page_index: int
-    yomitoku_json_path: Path           # results.to_json() の書き込み先
+    yomitoku_json_path: Path  # results.to_json() の書き込み先
     figure_paths: list[Path] = field(default_factory=list)  # 切り出し figure 画像
-    markdown_raw_path: Path = Path()   # results.to_markdown() のそのままの出力
+    markdown_raw_path: Path = Path()  # results.to_markdown() のそのままの出力
 
 
 @dataclass(frozen=True)
 class MathOverlay:
-    """figure 画像 → LaTeX 候補の対応表。math_extract ステージの出力。
+    """math_extract ステージの出力。クロップ画像 → LaTeX の対応を保持する。
 
-    items の値が空文字列の場合は「変換しなかった（数式ではない）」を意味する。
+    items[crop_path]    : LaTeX 文字列。空文字は「変換しなかった」を意味する
+    roles[crop_path]    : "inline_formula" / "display_formula"
+    originals[crop_path]: 元 paragraph.contents（raw.md 上の置換対象テキスト）
     """
 
     items: dict[Path, str] = field(default_factory=dict)
+    roles: dict[Path, str] = field(default_factory=dict)
+    originals: dict[Path, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -57,10 +62,10 @@ class PageMarkdown:
 class ChapterKind(str, Enum):
     """章の種別。"""
 
-    PREFACE = "preface"      # 前書き / まえがき / はじめに
-    CHAPTER = "chapter"      # 第N章
+    PREFACE = "preface"  # 前書き / まえがき / はじめに
+    CHAPTER = "chapter"  # 第N章
     AFTERWORD = "afterword"  # 後書き / あとがき / おわりに
-    INDEX = "index"          # 索引
+    INDEX = "index"  # 索引
 
 
 @dataclass(frozen=True)

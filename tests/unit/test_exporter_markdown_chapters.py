@@ -3,6 +3,7 @@
 章ごとに Markdown ファイルを出力し、ファイル名・assets コピー・
 画像パス書き換えが正しく動作することを検証する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -177,9 +178,7 @@ class Testスラグ変換:
     def test_スラグ化_全角空白は_に置換される(self, tmp_path: Path) -> None:
         pages = [_make_page(0)]
         chapters = [
-            _make_chapter(
-                1, ChapterKind.CHAPTER, "データ　クレンジング", 0, 0, chapter_number=1
-            )
+            _make_chapter(1, ChapterKind.CHAPTER, "データ　クレンジング", 0, 0, chapter_number=1)
         ]
         assets_dir = tmp_path / "assets"
 
@@ -191,9 +190,7 @@ class Testスラグ変換:
     def test_スラグ化_連続アンダースコアは1つに圧縮される(self, tmp_path: Path) -> None:
         pages = [_make_page(0)]
         chapters = [
-            _make_chapter(
-                1, ChapterKind.CHAPTER, "データ//クレンジング", 0, 0, chapter_number=1
-            )
+            _make_chapter(1, ChapterKind.CHAPTER, "データ//クレンジング", 0, 0, chapter_number=1)
         ]
         assets_dir = tmp_path / "assets"
 

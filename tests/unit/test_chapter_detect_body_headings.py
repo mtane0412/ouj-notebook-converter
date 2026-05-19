@@ -3,6 +3,7 @@
 各ページの Markdown 冒頭から 第N章・まえがき・あとがき・索引 のパターンを
 検出できることを検証する。
 """
+
 import pytest
 
 from ouj_notebook_converter.pipeline.stages.chapter_detect import (

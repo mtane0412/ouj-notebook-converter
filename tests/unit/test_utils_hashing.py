@@ -1,4 +1,5 @@
 """仕様: utils.hashing モジュール（ファイルハッシュ算出）のユニットテスト。"""
+
 from pathlib import Path
 
 import pytest

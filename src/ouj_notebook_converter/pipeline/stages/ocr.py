@@ -5,6 +5,7 @@
   yomitoku が未インストールの場合は Fail-Fast で案内メッセージを出す。
 - 本番では create_analyzer() で実際の DocumentAnalyzer を生成する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,9 +39,7 @@ class AnalyzerProtocol(Protocol):
     ocr_vis / layout_vis は可視化画像で本パイプラインでは使用しない。
     """
 
-    def __call__(
-        self, image: np.ndarray
-    ) -> tuple[AnalyzerResult, Any, Any]:
+    def __call__(self, image: np.ndarray) -> tuple[AnalyzerResult, Any, Any]:
         """画像を受け取り OCR 結果を返す。"""
         ...
 

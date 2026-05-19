@@ -1,4 +1,5 @@
 """仕様: ファイルおよび文字列の SHA-256 ハッシュを算出するユーティリティ。"""
+
 import hashlib
 from pathlib import Path
 

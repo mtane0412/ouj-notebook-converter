@@ -4,6 +4,7 @@ Yomitoku の load_pdf（pypdfium2 バックエンド）を使用する。
 遅延レンダリングのため大きな PDF でも OOM しにくい。
 yomitoku が未インストールの場合は Fail-Fast で案内する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

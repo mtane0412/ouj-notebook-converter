@@ -6,11 +6,12 @@ M2 以降で resume / inspect を追加する予定。
 Note: シラバス連携（detect_via_syllabus）は内部実装済みだが、OUJ シラバス URL の
 解析方式が未確定のため --course-code オプションは現バージョンでは公開していない。
 """
+
 from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -38,6 +39,7 @@ _VALID_DEVICES = {"mps", "cpu", "cuda"}
 
 class OutputFormat(str, Enum):
     """サポートする出力形式。"""
+
     md = "md"
     epub = "epub"
     pdf = "pdf"
@@ -46,6 +48,7 @@ class OutputFormat(str, Enum):
 
 class ReadingOrder(str, Enum):
     """Yomitoku の読み順推定モード。"""
+
     auto = "auto"
     left2right = "left2right"
     right2left = "right2left"
@@ -54,8 +57,17 @@ class ReadingOrder(str, Enum):
 
 class SplitMode(str, Enum):
     """出力ファイルの分割モード。"""
-    none = "none"        # デフォルト（--combine / --no-combine に従う）
+
+    none = "none"  # デフォルト（--combine / --no-combine に従う）
     chapters = "chapters"  # 章ごとに分割
+
+
+class MathBackend(str, Enum):
+    """数式変換バックエンドの選択肢。"""
+
+    none = "none"  # 数式処理しない（デフォルト）
+    pix2tex = "pix2tex"  # yomitoku paragraph 経由 + pix2tex API 認識
+    pix2text = "pix2text"  # Pix2Text API で検出・認識
 
 
 @app.command()
@@ -93,9 +105,46 @@ def convert(
         SplitMode,
         typer.Option("--split", help="出力分割モード: none / chapters"),
     ] = SplitMode.none,
+    math: Annotated[
+        bool,
+        typer.Option(
+            "--math/--no-math",
+            help="(非推奨) --math-backend pix2tex のエイリアス。--math-backend を使用してください。",
+        ),
+    ] = False,
+    math_backend: Annotated[
+        MathBackend,
+        typer.Option(
+            "--math-backend",
+            help="数式変換バックエンド: none (デフォルト), pix2tex (yomitoku paragraph 経由), "
+            "pix2text (Pix2Text 検出+認識)",
+        ),
+    ] = MathBackend.none,
+    pix2tex_url: Annotated[
+        str,
+        typer.Option(
+            "--pix2tex-url",
+            help="pix2tex API サーバーの URL (math-backend=pix2tex 時)",
+        ),
+    ] = "http://localhost:8502",
+    pix2text_url: Annotated[
+        str,
+        typer.Option(
+            "--pix2text-url",
+            help="Pix2Text 自前ラッパー URL (math-backend=pix2text 時)。scripts/pix2text_server.py を起動しておく必要あり",
+        ),
+    ] = "http://localhost:8503",
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
+    # --math (deprecated) の処理
+    if math and math_backend == MathBackend.none:
+        typer.echo(
+            "警告: --math は廃止予定 (deprecated) です。代わりに --math-backend pix2tex を使用してください。",
+            err=True,
+        )
+        math_backend = MathBackend.pix2tex
+
     # --- バリデーション ---
     if outdir is None:
         typer.echo("エラー: --outdir (-o) オプションは必須です。", err=True)
@@ -113,6 +162,17 @@ def convert(
         raise typer.Exit(code=1)
 
     effective_cache_dir = cache_dir or (outdir / ".cache")
+
+    # math_backend に応じたエンジンを構築する
+    math_engine: Any = None
+    if math_backend == MathBackend.pix2tex:
+        from ouj_notebook_converter.plugins.math.pix2tex_http import Pix2TexHttpEngine
+
+        math_engine = Pix2TexHttpEngine(base_url=pix2tex_url)
+    elif math_backend == MathBackend.pix2text:
+        from ouj_notebook_converter.plugins.math.pix2text_http import Pix2TextHttpDetector
+
+        math_engine = Pix2TextHttpDetector(base_url=pix2text_url)
 
     analyzer = create_analyzer(
         device=device,
@@ -135,6 +195,9 @@ def convert(
         analyzer=analyzer,
         reading_order=reading_order.value,
         ignore_meta=ignore_meta,
+        enable_math=(math_backend != MathBackend.none),
+        math_engine=math_engine,
+        math_backend=math_backend.value,
     )
 
     if verbose:
@@ -155,13 +218,9 @@ def convert(
                 raise typer.Exit(code=2) from e
 
             chapter_dir = outdir / book_name
-            written = export_markdown_by_chapters(
-                page_markdowns, chapters, chapter_dir, assets_dir
-            )
+            written = export_markdown_by_chapters(page_markdowns, chapters, chapter_dir, assets_dir)
             if verbose:
-                typer.echo(
-                    f"章分割 Markdown 出力: {chapter_dir} ({len(written)} ファイル)"
-                )
+                typer.echo(f"章分割 Markdown 出力: {chapter_dir} ({len(written)} ファイル)")
         else:
             out_path = outdir / f"{book_name}.md" if combine else outdir / book_name
             export_markdown(page_markdowns, out_path, assets_dir, combine=combine)
@@ -174,6 +233,7 @@ def convert(
 def _short_hash(path: Path) -> str:
     """ファイルの SHA-256 短縮ハッシュを返す（キャッシュディレクトリ名に使用）。"""
     from ouj_notebook_converter.utils.hashing import sha256_file
+
     try:
         return sha256_file(path, short=True)
     except FileNotFoundError:

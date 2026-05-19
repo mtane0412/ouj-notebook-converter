@@ -3,6 +3,7 @@
 httpx.Client をモック化し、フィクスチャ HTML を返すオフライン専用テスト。
 実際の OUJ サイトへのアクセスは行わない。
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -53,6 +54,7 @@ def _make_mock_client(html: str, status_code: int = 200) -> MagicMock:
     mock_response.raise_for_status = MagicMock()
     if status_code >= 400:
         import httpx
+
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             message=f"HTTP {status_code}",
             request=MagicMock(),

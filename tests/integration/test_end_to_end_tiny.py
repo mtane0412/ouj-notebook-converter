@@ -4,6 +4,7 @@ Yomitoku を実際に使用するため @pytest.mark.slow 付き。
 デフォルトでは pytest -m "not slow" でスキップされる。
 yomitoku と ocr extra が未インストールの場合は自動的にスキップする。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -15,6 +16,7 @@ import pytest
 # yomitoku が使えるかチェック
 try:
     import yomitoku  # type: ignore[import-untyped]  # noqa: F401
+
     YOMITOKU_AVAILABLE = True
 except ImportError:
     YOMITOKU_AVAILABLE = False
@@ -56,7 +58,9 @@ def tiny_pdf(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not YOMITOKU_AVAILABLE, reason="yomitoku が未インストール (uv sync --extra ocr)")
+@pytest.mark.skipif(
+    not YOMITOKU_AVAILABLE, reason="yomitoku が未インストール (uv sync --extra ocr)"
+)
 class TestEndToEndTiny:
     """tiny_2page.pdf を使ったエンドツーエンドテスト。"""
 
@@ -64,12 +68,18 @@ class TestEndToEndTiny:
         """ounc convert コマンドが exit_code=0 で終了することを確認。"""
         result = subprocess.run(
             [
-                sys.executable, "-m", "ouj_notebook_converter",
-                "convert", str(tiny_pdf),
-                "--outdir", str(tmp_path / "out"),
-                "--device", "cpu",
+                sys.executable,
+                "-m",
+                "ouj_notebook_converter",
+                "convert",
+                str(tiny_pdf),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--device",
+                "cpu",
                 "--lite",
-                "--pages", "1-2",
+                "--pages",
+                "1-2",
             ],
             capture_output=True,
             text=True,
@@ -84,10 +94,15 @@ class TestEndToEndTiny:
         out_dir = tmp_path / "out_md"
         subprocess.run(
             [
-                sys.executable, "-m", "ouj_notebook_converter",
-                "convert", str(tiny_pdf),
-                "--outdir", str(out_dir),
-                "--device", "cpu",
+                sys.executable,
+                "-m",
+                "ouj_notebook_converter",
+                "convert",
+                str(tiny_pdf),
+                "--outdir",
+                str(out_dir),
+                "--device",
+                "cpu",
                 "--lite",
             ],
             capture_output=True,
@@ -105,10 +120,15 @@ class TestEndToEndTiny:
         out_dir = tmp_path / "out_marker"
         subprocess.run(
             [
-                sys.executable, "-m", "ouj_notebook_converter",
-                "convert", str(tiny_pdf),
-                "--outdir", str(out_dir),
-                "--device", "cpu",
+                sys.executable,
+                "-m",
+                "ouj_notebook_converter",
+                "convert",
+                str(tiny_pdf),
+                "--outdir",
+                str(out_dir),
+                "--device",
+                "cpu",
                 "--lite",
             ],
             capture_output=True,
@@ -124,10 +144,15 @@ class TestEndToEndTiny:
         """同じコマンドを 2 回実行しても正常終了することを確認（M2 でキャッシュ高速化）。"""
         out_dir = tmp_path / "out_cache"
         cmd = [
-            sys.executable, "-m", "ouj_notebook_converter",
-            "convert", str(tiny_pdf),
-            "--outdir", str(out_dir),
-            "--device", "cpu",
+            sys.executable,
+            "-m",
+            "ouj_notebook_converter",
+            "convert",
+            str(tiny_pdf),
+            "--outdir",
+            str(out_dir),
+            "--device",
+            "cpu",
             "--lite",
         ]
         subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=True)
