@@ -19,9 +19,12 @@ python3.11 -m venv ~/.venvs/pix2text
 
 ## エンドポイント
 
-- GET  /health  → {"ok": true}
-- POST /detect  multipart/form-data image=<png>
+- GET  /health    → {"ok": true}
+- POST /detect    multipart/form-data image=<png>
     → [{"box":[x1,y1,x2,y2], "type":"isolated"|"embedding", "latex":str, "score":float}, ...]
+- POST /recognize multipart/form-data image=<png>
+    → {"latex":str, "score":float}
+    トリミング後の数式画像 1 枚を LatexOCR のみで再認識する。検出処理は行わない。
 
 ## 本体 CLI からの呼び出し
 
@@ -62,8 +65,22 @@ def build_app(mfd: MathFormulaDetector, mfr: LatexOCR) -> FastAPI:
     def health() -> dict[str, bool]:
         return {"ok": True}
 
+    @app.post("/recognize")
+    async def recognize(image: UploadFile = File(...)) -> dict[str, float | str]:  # noqa: B008
+        """crop 済み数式画像 1 枚を受け取り LatexOCR で LaTeX を認識して返す。
+
+        MathFormulaDetector による検出は行わず、LatexOCR.recognize() のみを実行する。
+        日本語ラベルを除外してトリミングした画像の再認識用エンドポイント。
+        """
+        img_bytes = await image.read()
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        rec_result = mfr.recognize(pil_img)
+        latex = (rec_result.get("text", "") if isinstance(rec_result, dict) else str(rec_result)).strip()
+        score = float(rec_result.get("score", 0.0)) if isinstance(rec_result, dict) else 0.0
+        return {"latex": latex, "score": score}
+
     @app.post("/detect")
-    async def detect(image: UploadFile = File(...)) -> list[dict]:
+    async def detect(image: UploadFile = File(...)) -> list[dict]:  # noqa: B008
         """ページ画像から数式を検出・認識して JSON を返す。"""
         img_bytes = await image.read()
         pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")

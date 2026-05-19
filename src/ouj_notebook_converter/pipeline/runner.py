@@ -164,7 +164,11 @@ def _default_math_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
 
 
 def _default_detect_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
-    """デフォルトの math_detect 関数を生成するファクトリ（pix2text バックエンド用）。"""
+    """デフォルトの math_detect 関数を生成するファクトリ（pix2text バックエンド用）。
+
+    config.math_engine は MathDetectorProtocol と MathRecognizerProtocol の両方を満たす
+    Pix2TextHttpDetector インスタンスを想定しており、detector と recognizer の両引数に渡す。
+    """
 
     def _fn(
         image: np.ndarray,
@@ -173,6 +177,8 @@ def _default_detect_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
         *,
         detector: Any,
     ) -> MathOverlay:
-        return math_detect(image, analysis, cache_page_dir, detector=detector)
+        return math_detect(
+            image, analysis, cache_page_dir, detector=detector, recognizer=detector
+        )
 
     return _fn

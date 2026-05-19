@@ -52,6 +52,29 @@ class FormulaDetection:
 
 
 @runtime_checkable
+class MathRecognizerProtocol(Protocol):
+    """crop 済み数式画像 1 枚を LaTeX 文字列とスコアに変換するエンジンのインターフェース。
+
+    日本語ラベルを除外してトリミングした画像の再認識に使用する。
+    失敗時は MathEngineError を送出する（暗黙フォールバック禁止）。
+    """
+
+    def recognize_image(self, image_path: Path) -> tuple[str, float]:
+        """PNG 画像 1 枚を LaTeX 文字列とスコアのタプルに変換する。
+
+        Args:
+            image_path: 入力画像の絶対パス（PNG 形式）。
+
+        Returns:
+            (latex, score) のタプル。latex は先頭末尾の空白除去済み。
+
+        Raises:
+            MathEngineError: エンジンの呼び出しに失敗した場合。
+        """
+        ...
+
+
+@runtime_checkable
 class MathDetectorProtocol(Protocol):
     """ページ画像 1 枚から数式 bbox と LaTeX を一括取得するエンジンのインターフェース。
 
