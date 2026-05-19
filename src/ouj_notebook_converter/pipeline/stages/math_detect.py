@@ -1,13 +1,16 @@
-"""仕様: Pix2Text HTTP API で数式を検出・認識し、yomitoku paragraph と IoU マッチして MathOverlay を構築するステージ。
+"""仕様: Pix2Text HTTP API で数式を検出・認識し、yomitoku paragraph と IoA マッチして MathOverlay を構築するステージ。
 
 処理フロー:
   1. ページ画像を PNG として保存（Pix2Text HTTP API に送るため）
   2. detector.detect_and_recognize() でページ全体から数式を検出・LaTeX 化
-  3. analysis.json の全 paragraph から IoU 最大の paragraph とマッチング
+  3. analysis.json の全 paragraph から IoA 最大の paragraph とマッチング
   4. マッチした paragraph の contents を original として MathOverlay に登録
   5. マッチしない検出は warning ログを出してスキップ（Fail-Fast なし）
 
-IoU マッチ閾値: 0.3（yomitoku の paragraph bbox が大きめに取られるため低めに設定）
+IoA マッチ閾値: 0.5
+  IoA = intersection / formula_bbox_area
+  インライン数式は paragraph bbox に完全包含されるが IoU は極小になるため、
+  数式 bbox が paragraph に占める割合（IoA）でマッチングする。
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from ouj_notebook_converter.plugins.math.base import FormulaDetection, MathDetec
 logger = logging.getLogger(__name__)
 
 _TYPE_TO_ROLE = {"embedding": "inline_formula", "isolated": "display_formula"}
-_IOU_THRESHOLD = 0.3
+_IOA_THRESHOLD = 0.5
 
 
 def iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
@@ -61,23 +64,57 @@ def iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> f
     return intersection / union
 
 
-def match_paragraph_by_iou(
+def ioa(
+    formula_box: tuple[int, int, int, int], para_box: tuple[int, int, int, int]
+) -> float:
+    """数式 bbox が paragraph bbox にどれだけ含まれるか（IoA: Intersection over formula Area）を返す。
+
+    インライン数式は paragraph bbox に完全包含されるが、paragraph が大きいため
+    IoU は極小になる。IoA = intersection / formula_area を使うことで
+    「数式が paragraph の中にある」ことを正しく捉えられる。
+
+    Args:
+        formula_box: 数式の bbox (x1, y1, x2, y2)。
+        para_box: paragraph の bbox (x1, y1, x2, y2)。
+
+    Returns:
+        IoA 値 (0.0〜1.0)。数式面積が 0 の場合は 0.0 を返す。
+    """
+    fx1, fy1, fx2, fy2 = formula_box
+    px1, py1, px2, py2 = para_box
+
+    inter_x1 = max(fx1, px1)
+    inter_y1 = max(fy1, py1)
+    inter_x2 = min(fx2, px2)
+    inter_y2 = min(fy2, py2)
+
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_h = max(0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    formula_area = max(0, fx2 - fx1) * max(0, fy2 - fy1)
+    if formula_area == 0:
+        return 0.0
+    return intersection / formula_area
+
+
+def match_paragraph_by_ioa(
     detection_box: tuple[int, int, int, int],
     paragraphs: list[dict[str, Any]],
     *,
-    threshold: float = _IOU_THRESHOLD,
+    threshold: float = _IOA_THRESHOLD,
 ) -> dict[str, Any] | None:
-    """IoU 最大の paragraph を返す。閾値未満なら None。
+    """IoA 最大の paragraph を返す。閾値未満なら None。
 
     contents が None の paragraph はスキップする（raw.md 上で置換対象がないため）。
 
     Args:
         detection_box: Pix2Text が検出した数式の bbox (x1, y1, x2, y2)。
         paragraphs: analysis.json の paragraphs[] リスト。
-        threshold: IoU 閾値（この値未満の場合は None を返す）。
+        threshold: IoA 閾値（この値未満の場合は None を返す）。
 
     Returns:
-        IoU 最大かつ閾値以上の paragraph dict。該当なしなら None。
+        IoA 最大かつ閾値以上の paragraph dict。該当なしなら None。
     """
     best_para: dict[str, Any] | None = None
     best_score = threshold
@@ -87,7 +124,7 @@ def match_paragraph_by_iou(
             continue
         box_raw = para["box"]
         para_box = (int(box_raw[0]), int(box_raw[1]), int(box_raw[2]), int(box_raw[3]))
-        score = iou(detection_box, para_box)
+        score = ioa(detection_box, para_box)
         if score >= best_score:
             best_score = score
             best_para = para
@@ -135,7 +172,7 @@ def math_detect(
     originals: dict[Path, str] = {}
 
     for idx, detection in enumerate(detections):
-        matched_para = match_paragraph_by_iou(detection.box, paragraphs)
+        matched_para = match_paragraph_by_ioa(detection.box, paragraphs)
         if matched_para is None:
             latex_preview = detection.latex[:40]
             logger.warning(

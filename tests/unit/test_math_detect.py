@@ -1,4 +1,4 @@
-"""仕様: math_detect ステージ（Pix2Text による数式検出・IoU マッチ・MathOverlay 構築）の動作検証。"""
+"""仕様: math_detect ステージ（Pix2Text による数式検出・IoA マッチ・MathOverlay 構築）の動作検証。"""
 
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ import numpy as np
 import pytest
 
 from ouj_notebook_converter.pipeline.stages.math_detect import (
+    ioa,
     iou,
-    match_paragraph_by_iou,
+    match_paragraph_by_ioa,
     math_detect,
 )
 from ouj_notebook_converter.pipeline.types import PageAnalysis
@@ -70,35 +71,64 @@ class TestIou:
         assert iou((0, 0, 0, 0), (0, 0, 100, 100)) == pytest.approx(0.0)
 
 
-class TestMatchParagraphByIou:
-    def test_match_paragraph_by_iouはIoU最大のparagraphを返す(self) -> None:
+class TestIoa:
+    def test_ioaは数式が段落に完全包含されると1を返す(self) -> None:
+        # 数式 bbox が paragraph bbox に完全に含まれる
+        assert ioa((10, 10, 20, 20), (0, 0, 100, 100)) == pytest.approx(1.0)
+
+    def test_ioaは交差なしで0を返す(self) -> None:
+        assert ioa((200, 200, 300, 300), (0, 0, 100, 100)) == pytest.approx(0.0)
+
+    def test_ioaは半分はみ出す場合0_5を返す(self) -> None:
+        # 数式 (0,0)-(100,100) area=10000 の半分が段落 (50,0)-(200,100) に含まれる
+        # intersection: (50,0)-(100,100) area=5000
+        # IoA = 5000 / 10000 = 0.5
+        assert ioa((0, 0, 100, 100), (50, 0, 200, 100)) == pytest.approx(0.5)
+
+    def test_ioaは数式がゼロサイズなら0を返す(self) -> None:
+        # 数式面積がゼロの場合は定義できないため 0 を返す
+        assert ioa((0, 0, 0, 0), (0, 0, 100, 100)) == pytest.approx(0.0)
+
+
+class TestMatchParagraphByIoa:
+    def test_match_paragraph_by_ioaはIoA最大のparagraphを返す(self) -> None:
         paragraphs = [
             {"box": [0, 0, 100, 100], "contents": "段落A", "role": None, "order": 0},
             {"box": [200, 0, 300, 100], "contents": "段落B", "role": None, "order": 1},
         ]
-        # detection box は段落A と完全一致
-        result = match_paragraph_by_iou((0, 0, 100, 100), paragraphs, threshold=0.3)
+        # detection box は段落A に完全包含
+        result = match_paragraph_by_ioa((0, 0, 100, 100), paragraphs, threshold=0.5)
         assert result is not None
         assert result["contents"] == "段落A"
 
-    def test_match_paragraph_by_iouは閾値未満ならNoneを返す(self) -> None:
+    def test_インライン数式は幅広い段落に完全包含されればマッチする(self) -> None:
+        # 幅広い paragraph の中に小さなインライン数式が含まれるケース
+        # IoU では IoA ≪ 0.03 でマッチしないが、IoA = 1.0 でマッチする
+        paragraphs = [
+            {"box": [0, 0, 900, 100], "contents": "z は定数である", "role": None, "order": 0},
+        ]
+        result = match_paragraph_by_ioa((400, 10, 430, 90), paragraphs, threshold=0.5)
+        assert result is not None
+        assert result["contents"] == "z は定数である"
+
+    def test_match_paragraph_by_ioaは閾値未満ならNoneを返す(self) -> None:
         paragraphs = [
             {"box": [0, 0, 100, 100], "contents": "段落C", "role": None, "order": 0},
         ]
         # detection box はほとんど重ならない
-        result = match_paragraph_by_iou((500, 500, 600, 600), paragraphs, threshold=0.3)
+        result = match_paragraph_by_ioa((500, 500, 600, 600), paragraphs, threshold=0.5)
         assert result is None
 
-    def test_match_paragraph_by_iouはparagraphsが空ならNoneを返す(self) -> None:
-        result = match_paragraph_by_iou((0, 0, 100, 100), [], threshold=0.3)
+    def test_match_paragraph_by_ioaはparagraphsが空ならNoneを返す(self) -> None:
+        result = match_paragraph_by_ioa((0, 0, 100, 100), [], threshold=0.5)
         assert result is None
 
-    def test_match_paragraph_by_iouはcontentsがNoneのparagraphを無視する(self) -> None:
+    def test_match_paragraph_by_ioaはcontentsがNoneのparagraphを無視する(self) -> None:
         paragraphs: list[dict[str, Any]] = [
             {"box": [0, 0, 100, 100], "contents": None, "role": None, "order": 0},
             {"box": [0, 0, 100, 100], "contents": "段落D", "role": None, "order": 1},
         ]
-        result = match_paragraph_by_iou((0, 0, 100, 100), paragraphs, threshold=0.3)
+        result = match_paragraph_by_ioa((0, 0, 100, 100), paragraphs, threshold=0.5)
         assert result is not None
         assert result["contents"] == "段落D"
 
