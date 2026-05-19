@@ -4,6 +4,7 @@ PageMarkdown のリストを受け取り、最終的な Markdown ファイルと
 figure アセットを出力先ディレクトリに書き出す処理をテストする。
 PageMarkdown.markdown 内の figure 参照はアセットの絶対パスで記述されている前提。
 """
+
 from pathlib import Path
 
 from ouj_notebook_converter.exporters.markdown import export_markdown

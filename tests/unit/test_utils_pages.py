@@ -1,4 +1,5 @@
 """仕様: utils.pages モジュール（ページ範囲パース）のユニットテスト。"""
+
 import pytest
 
 from ouj_notebook_converter.utils.pages import parse_page_range

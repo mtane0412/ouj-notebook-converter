@@ -6,6 +6,7 @@
 - combine=True の場合は 1 ファイルに結合、False の場合はページごとのファイルに分割する
 - export_markdown_by_chapters: ChapterSpec リストに従って章ごとにファイルを分割する
 """
+
 from __future__ import annotations
 
 import re

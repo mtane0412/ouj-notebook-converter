@@ -3,6 +3,7 @@
 --split chapters 指定時に章分割エクスポーターが呼ばれること、
 ChapterDetectionError 時は終了コード 2 になることを検証する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,9 +39,15 @@ class TestSplitオプション:
             mock_loader.total_pages = 1
             mock_load.return_value = mock_loader
 
-            result = _RUNNER.invoke(app, [
-                str(pdf), "-o", str(tmp_path), "--no-cache",
-            ])
+            result = _RUNNER.invoke(
+                app,
+                [
+                    str(pdf),
+                    "-o",
+                    str(tmp_path),
+                    "--no-cache",
+                ],
+            )
 
         # エラーなし（exit code 0）かつ章分割エクスポーターは呼ばれない
         assert result.exit_code == 0, result.output
@@ -68,27 +75,30 @@ class TestSplitオプション:
             patch(f"{_MODULE_CLI}.run_pages", return_value=fake_pages),
             patch(f"{_MODULE_CLI}.load_pdf_pages") as mock_load,
             patch(f"{_MODULE_CLI}.create_analyzer", return_value=MagicMock()),
-            patch(
-                f"{_MODULE_CLI}.detect_chapters", return_value=fake_chapters
-            ) as mock_detect,
+            patch(f"{_MODULE_CLI}.detect_chapters", return_value=fake_chapters) as mock_detect,
             patch(f"{_MODULE_CLI}.export_markdown_by_chapters") as mock_export_chapters,
         ):
             mock_loader = MagicMock()
             mock_loader.total_pages = 1
             mock_load.return_value = mock_loader
 
-            result = _RUNNER.invoke(app, [
-                str(pdf), "-o", str(tmp_path),
-                "--split", "chapters", "--no-cache",
-            ])
+            result = _RUNNER.invoke(
+                app,
+                [
+                    str(pdf),
+                    "-o",
+                    str(tmp_path),
+                    "--split",
+                    "chapters",
+                    "--no-cache",
+                ],
+            )
 
         assert result.exit_code == 0, result.output
         mock_detect.assert_called_once()
         mock_export_chapters.assert_called_once()
 
-    def test_split_chaptersでChapterDetectionError時は終了コード2(
-        self, tmp_path: Path
-    ) -> None:
+    def test_split_chaptersでChapterDetectionError時は終了コード2(self, tmp_path: Path) -> None:
         from ouj_notebook_converter.pipeline.stages.chapter_detect import ChapterDetectionError
         from ouj_notebook_converter.pipeline.types import PageMarkdown
 
@@ -107,10 +117,16 @@ class TestSplitオプション:
             mock_loader.total_pages = 1
             mock_load.return_value = mock_loader
 
-            result = _RUNNER.invoke(app, [
-                str(pdf), "-o", str(tmp_path),
-                "--split", "chapters", "--no-cache",
-            ])
+            result = _RUNNER.invoke(
+                app,
+                [
+                    str(pdf),
+                    "-o",
+                    str(tmp_path),
+                    "--split",
+                    "chapters",
+                    "--no-cache",
+                ],
+            )
 
         assert result.exit_code == 2
-

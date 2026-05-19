@@ -3,6 +3,7 @@
 フォールバックチェーン（syllabus → pdf_toc → ocr_toc → body_headings）が
 正しい順序で試行されることを検証する。各検出器はモックで差し替える。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,15 +39,11 @@ def _make_chapter_spec() -> list[ChapterSpec]:
 
 
 class Testフォールバックチェーン:
-    def test_course_code指定時はシラバス検出が最初に試行される(
-        self, tmp_path: Path
-    ) -> None:
+    def test_course_code指定時はシラバス検出が最初に試行される(self, tmp_path: Path) -> None:
         expected = _make_chapter_spec()
         with patch(f"{_MODULE}.detect_via_syllabus", return_value=expected) as mock_syllabus:
             pages = [_make_page(i) for i in range(5)]
-            result = detect_chapters(
-                tmp_path / "dummy.pdf", pages, course_code="1234567"
-            )
+            result = detect_chapters(tmp_path / "dummy.pdf", pages, course_code="1234567")
         mock_syllabus.assert_called_once()
         assert result == expected
 
@@ -57,15 +54,11 @@ class Testフォールバックチェーン:
             patch(f"{_MODULE}.detect_via_pdf_toc", return_value=expected) as mock_pdf,
         ):
             pages = [_make_page(i) for i in range(5)]
-            result = detect_chapters(
-                tmp_path / "dummy.pdf", pages, course_code="1234567"
-            )
+            result = detect_chapters(tmp_path / "dummy.pdf", pages, course_code="1234567")
         mock_pdf.assert_called_once()
         assert result == expected
 
-    def test_course_code未指定時はシラバス検出をスキップする(
-        self, tmp_path: Path
-    ) -> None:
+    def test_course_code未指定時はシラバス検出をスキップする(self, tmp_path: Path) -> None:
         expected = _make_chapter_spec()
         with (
             patch(f"{_MODULE}.detect_via_syllabus") as mock_syllabus,
@@ -98,9 +91,7 @@ class Testフォールバックチェーン:
         mock_body.assert_called_once()
         assert result == expected
 
-    def test_全検出器失敗時はChapterDetectionErrorを送出する(
-        self, tmp_path: Path
-    ) -> None:
+    def test_全検出器失敗時はChapterDetectionErrorを送出する(self, tmp_path: Path) -> None:
         with (
             patch(f"{_MODULE}.detect_via_pdf_toc", side_effect=ChapterDetectionError("TOC失敗")),
             patch(f"{_MODULE}.detect_via_ocr_toc", side_effect=ChapterDetectionError("OCR失敗")),
@@ -113,9 +104,7 @@ class Testフォールバックチェーン:
             with pytest.raises(ChapterDetectionError, match="章境界を検出できません"):
                 detect_chapters(tmp_path / "dummy.pdf", pages)
 
-    def test_エラーメッセージに各検出器の失敗理由が含まれる(
-        self, tmp_path: Path
-    ) -> None:
+    def test_エラーメッセージに各検出器の失敗理由が含まれる(self, tmp_path: Path) -> None:
         with (
             patch(f"{_MODULE}.detect_via_pdf_toc", side_effect=ChapterDetectionError("TOC失敗")),
             patch(f"{_MODULE}.detect_via_ocr_toc", side_effect=ChapterDetectionError("OCR失敗")),

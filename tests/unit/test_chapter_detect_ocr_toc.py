@@ -3,6 +3,7 @@
 OCR 済みの目次ページ Markdown から章タイトルとページ番号を抽出し、
 章境界を正しく計算できることを検証する。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,7 +31,7 @@ _TYPICAL_TOC_MD = """\
 
 _TYPICAL_BODY_PAGES = [
     _make_page(0, "# まえがき\n本書について"),
-    _make_page(1, "# 目次\n第1章..."),         # 目次ページ（ダミー）
+    _make_page(1, "# 目次\n第1章..."),  # 目次ページ（ダミー）
     _make_page(9, "# 第1章 データとは何か\n本文"),
     _make_page(29, "# 第2章 データの収集と前処理\n本文"),
     _make_page(54, "# 第3章 統計的分析の基礎\n本文"),
@@ -143,9 +144,7 @@ class TestDetectViaOcrTocNTitle形式:
             *[_make_page(i + 2, "本文") for i in range(100)],
         ]
         chapters = detect_via_ocr_toc(pages)
-        numbers = sorted(
-            c.chapter_number for c in chapters if c.kind == ChapterKind.CHAPTER
-        )
+        numbers = sorted(c.chapter_number for c in chapters if c.kind == ChapterKind.CHAPTER)
         assert 1 in numbers
         assert 2 in numbers
         assert 3 in numbers
