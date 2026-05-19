@@ -3,7 +3,10 @@
 各ページについて以下の順に処理を行う:
   1. ローダーからページ画像を取得
   2. analyze_fn でOCRを実行（デフォルトは stages/ocr.py の analyze_page）
-  3. enable_math=True のとき math_fn で数式を LaTeX に変換
+  3. math_backend に応じて math_fn または detect_fn で数式を LaTeX に変換
+     - "pix2tex"  : math_fn（yomitoku paragraph 経由 + pix2tex 認識）
+     - "pix2text" : detect_fn（Pix2Text 検出 + 認識）
+     - "none"     : スキップ
   4. post_process でPageMarkdownを構築
 
 M2 でページ単位のキャッシュ判定ロジックをここに追加する予定。
@@ -14,10 +17,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
+from ouj_notebook_converter.pipeline.stages.math_detect import math_detect
 from ouj_notebook_converter.pipeline.stages.math_extract import math_extract
 from ouj_notebook_converter.pipeline.stages.ocr import analyze_page
 from ouj_notebook_converter.pipeline.stages.post_process import build_page_markdown
@@ -55,8 +59,11 @@ class ConvertConfig:
     analyzer: Any  # AnalyzerProtocol を満たすオブジェクト
     reading_order: str = "auto"
     ignore_meta: bool = False
-    enable_math: bool = False  # True のとき math_extract ステージを実行する
-    math_engine: Any = field(default=None)  # MathEngineProtocol 互換オブジェクト（None なら NoOp）
+    enable_math: bool = False  # 後方互換のため残す。"pix2tex" のエイリアスとして扱う
+    math_engine: Any = field(
+        default=None
+    )  # MathEngineProtocol / MathDetectorProtocol 互換オブジェクト
+    math_backend: Literal["none", "pix2tex", "pix2text"] = "none"
 
 
 def run_pages(
@@ -65,6 +72,7 @@ def run_pages(
     loader: PageLoader,
     analyze_fn: Callable[..., PageAnalysis] | None = None,
     math_fn: Callable[..., MathOverlay] | None = None,
+    detect_fn: Callable[..., MathOverlay] | None = None,
 ) -> list[PageMarkdown]:
     """対象ページを順に OCR 処理し、PageMarkdown のリストを返す。
 
@@ -73,8 +81,10 @@ def run_pages(
         loader: PDF ページ画像のイテレータ（yomitoku.data.functions.load_pdf の戻り値相当）。
         analyze_fn: analyze ステージの関数。テストで差し替える用途に使う。
                     省略時は stages/ocr.py の analyze_page を使用する。
-        math_fn: math_extract ステージの関数。テストで差し替える用途に使う。
+        math_fn: math_extract ステージの関数（pix2tex バックエンド用）。
                  省略時は stages/math_extract.py の math_extract を使用する。
+        detect_fn: math_detect ステージの関数（pix2text バックエンド用）。
+                   省略時は stages/math_detect.py の math_detect を使用する。
 
     Returns:
         処理順（page_index 昇順）の PageMarkdown リスト。
@@ -83,6 +93,11 @@ def run_pages(
         RuntimeError: ページ処理中に回復不能なエラーが発生した場合。
     """
     _analyze = analyze_fn or _default_analyze_fn(config)
+
+    # enable_math=True（後方互換）は math_backend="pix2tex" と等価
+    effective_backend = config.math_backend
+    if effective_backend == "none" and config.enable_math:
+        effective_backend = "pix2tex"
 
     target_set = set(config.page_indices)
     results: list[PageMarkdown] = []
@@ -106,9 +121,12 @@ def run_pages(
         )
 
         overlay: MathOverlay | None = None
-        if config.enable_math:
+        if effective_backend == "pix2tex":
             _math = math_fn or _default_math_fn(config)
             overlay = _math(image, analysis, page_cache_dir, engine=config.math_engine)
+        elif effective_backend == "pix2text":
+            _detect = detect_fn or _default_detect_fn(config)
+            overlay = _detect(image, analysis, page_cache_dir, detector=config.math_engine)
 
         page_md = build_page_markdown(analysis, math_overlay=overlay)
         results.append(page_md)
@@ -131,7 +149,7 @@ def _default_analyze_fn(config: ConvertConfig) -> Callable[..., PageAnalysis]:
 
 
 def _default_math_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
-    """デフォルトの math_extract 関数を生成するファクトリ。"""
+    """デフォルトの math_extract 関数を生成するファクトリ（pix2tex バックエンド用）。"""
 
     def _fn(
         image: np.ndarray,
@@ -141,5 +159,20 @@ def _default_math_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
         engine: Any,
     ) -> MathOverlay:
         return math_extract(image, analysis, cache_page_dir, engine=engine)
+
+    return _fn
+
+
+def _default_detect_fn(config: ConvertConfig) -> Callable[..., MathOverlay]:
+    """デフォルトの math_detect 関数を生成するファクトリ（pix2text バックエンド用）。"""
+
+    def _fn(
+        image: np.ndarray,
+        analysis: PageAnalysis,
+        cache_page_dir: Path,
+        *,
+        detector: Any,
+    ) -> MathOverlay:
+        return math_detect(image, analysis, cache_page_dir, detector=detector)
 
     return _fn

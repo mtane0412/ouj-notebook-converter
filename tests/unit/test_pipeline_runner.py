@@ -210,6 +210,139 @@ class TestRunPagesWithMath:
         assert len(results) == 1
         assert r"\Gamma(z)" in results[0].markdown
 
+    def test_math_backend_noneならmath_fnもdetect_fnも呼ばれない(self, tmp_path: Path) -> None:
+        """math_backend="none"（デフォルト）の場合、math_fn も detect_fn も呼ばれない。"""
+        fake_loader = _make_fake_loader(1)
+        fake_analyze = _make_fake_analyze(tmp_path)
+        fake_math = MagicMock(return_value=MathOverlay())
+        fake_detect = MagicMock(return_value=MathOverlay())
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=tmp_path / ".cache",
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            math_backend="none",
+        )
+
+        run_pages(
+            config,
+            loader=fake_loader,
+            analyze_fn=fake_analyze,
+            math_fn=fake_math,
+            detect_fn=fake_detect,
+        )
+
+        fake_math.assert_not_called()
+        fake_detect.assert_not_called()
+
+    def test_math_backend_pix2texならmath_fnのみ呼ばれる(self, tmp_path: Path) -> None:
+        """math_backend="pix2tex" のとき math_fn のみ呼ばれ、detect_fn は呼ばれない。"""
+        fake_loader = _make_fake_loader(2)
+        fake_analyze = _make_fake_analyze(tmp_path)
+        fake_math = MagicMock(return_value=MathOverlay())
+        fake_detect = MagicMock(return_value=MathOverlay())
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=tmp_path / ".cache",
+            page_indices=[0, 1],
+            dpi=200,
+            analyzer=MagicMock(),
+            math_backend="pix2tex",
+            math_engine=MagicMock(),
+        )
+
+        run_pages(
+            config,
+            loader=fake_loader,
+            analyze_fn=fake_analyze,
+            math_fn=fake_math,
+            detect_fn=fake_detect,
+        )
+
+        assert fake_math.call_count == 2
+        fake_detect.assert_not_called()
+
+    def test_math_backend_pix2textならdetect_fnのみ呼ばれる(self, tmp_path: Path) -> None:
+        """math_backend="pix2text" のとき detect_fn のみ呼ばれ、math_fn は呼ばれない。"""
+        fake_loader = _make_fake_loader(2)
+        fake_analyze = _make_fake_analyze(tmp_path)
+        fake_math = MagicMock(return_value=MathOverlay())
+        fake_detect = MagicMock(return_value=MathOverlay())
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=tmp_path / ".cache",
+            page_indices=[0, 1],
+            dpi=200,
+            analyzer=MagicMock(),
+            math_backend="pix2text",
+            math_engine=MagicMock(),
+        )
+
+        run_pages(
+            config,
+            loader=fake_loader,
+            analyze_fn=fake_analyze,
+            math_fn=fake_math,
+            detect_fn=fake_detect,
+        )
+
+        assert fake_detect.call_count == 2
+        fake_math.assert_not_called()
+
+    def test_detect_fnの結果がbuild_page_markdownにoverlayとして渡る(self, tmp_path: Path) -> None:
+        """detect_fn が返した overlay を通じて LaTeX が最終 Markdown に反映される。"""
+        fake_loader = _make_fake_loader(1)
+
+        def _fake_analyze(
+            image: np.ndarray, page_cache_dir: Path, *, analyzer: object
+        ) -> PageAnalysis:
+            json_path = page_cache_dir / "analysis.json"
+            raw_md_path = page_cache_dir / "raw.md"
+            json_path.write_text("{}", encoding="utf-8")
+            raw_md_path.write_text("本文テキスト\n\n数式テキスト\n", encoding="utf-8")
+            return PageAnalysis(
+                page_index=0,
+                yomitoku_json_path=json_path,
+                figure_paths=[],
+                markdown_raw_path=raw_md_path,
+            )
+
+        crop_png = tmp_path / "0000.png"
+
+        def _fake_detect(
+            image: np.ndarray,
+            analysis: PageAnalysis,
+            cache_page_dir: Path,
+            *,
+            detector: object,
+        ) -> MathOverlay:
+            return MathOverlay(
+                items={crop_png: r"\sum_{k=1}^{n}"},
+                roles={crop_png: "display_formula"},
+                originals={crop_png: "数式テキスト"},
+            )
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=tmp_path / ".cache",
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            math_backend="pix2text",
+            math_engine=MagicMock(),
+        )
+
+        results = run_pages(
+            config, loader=fake_loader, analyze_fn=_fake_analyze, detect_fn=_fake_detect
+        )
+
+        assert len(results) == 1
+        assert r"\sum_{k=1}^{n}" in results[0].markdown
+
     def test_ページキャッシュディレクトリが作成される(self, tmp_path: Path) -> None:
         fake_loader = _make_fake_loader(2)
         fake_analyze = _make_fake_analyze(tmp_path)
