@@ -1,4 +1,5 @@
 """仕様: pipeline.types モジュールのデータクラスのユニットテスト。"""
+
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,23 @@ class TestMathOverlay:
     def test_空の辞書でも作成できる(self) -> None:
         overlay = MathOverlay(items={})
         assert overlay.items == {}
+
+    def test_MathOverlayにrolesとoriginalsを初期化できる(self, tmp_path: Path) -> None:
+        math_png = tmp_path / "0001.png"
+        overlay = MathOverlay(
+            items={math_png: r"\frac{1}{2}"},
+            roles={math_png: "display_formula"},
+            originals={math_png: "分の1乗"},
+        )
+        assert overlay.roles[math_png] == "display_formula"
+        assert overlay.originals[math_png] == "分の1乗"
+
+    def test_MathOverlayは既存のitems引数のみで後方互換に構築できる(self, tmp_path: Path) -> None:
+        # roles と originals を省略してもデフォルト空 dict で構築できること
+        fig = tmp_path / "fig.png"
+        overlay = MathOverlay(items={fig: r"\alpha + \beta"})
+        assert overlay.roles == {}
+        assert overlay.originals == {}
 
 
 class TestPageMarkdown:

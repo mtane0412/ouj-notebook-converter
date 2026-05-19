@@ -3,6 +3,7 @@
 Yomitoku の DocumentAnalyzer は重いモデルを伴うため、
 テストでは AnalyzerProtocol を満たす Fake を注入してテストする。
 """
+
 from __future__ import annotations
 
 import json
@@ -17,11 +18,12 @@ from ouj_notebook_converter.pipeline.stages.ocr import (
     create_analyzer,
 )
 from ouj_notebook_converter.pipeline.stages.post_process import build_page_markdown
-from ouj_notebook_converter.pipeline.types import PageAnalysis, PageMarkdown
+from ouj_notebook_converter.pipeline.types import MathOverlay, PageAnalysis, PageMarkdown
 
 # ---------------------------------------------------------------------------
 # Fake アナライザー（テスト用）
 # ---------------------------------------------------------------------------
+
 
 class FakeAnalyzerResult:
     """Yomitoku の DocumentAnalyzer の戻り値 (results) に相当する Fake。"""
@@ -112,6 +114,7 @@ class TestCreateAnalyzer:
     def test_liteやignore_line_breakの引数を受け付けない(self) -> None:
         """yomitoku 0.13.0 で削除された引数が create_analyzer に存在しないことを確認。"""
         import inspect
+
         sig = inspect.signature(create_analyzer)
         assert "lite" not in sig.parameters
         assert "ignore_line_break" not in sig.parameters
@@ -227,3 +230,112 @@ class TestBuildPageMarkdown:
         )
         with pytest.raises(FileNotFoundError):
             build_page_markdown(analysis)
+
+    def test_math_overlay_Noneなら従来通りraw_mdをそのまま返す(self, tmp_path: Path) -> None:
+        """math_overlay を省略した場合（None）、raw.md の内容がそのまま markdown になる。"""
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("本文テキスト\n", encoding="utf-8")
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis)
+
+        assert result.markdown == "本文テキスト\n"
+
+    def test_inline_formulaがdollar囲みで置換される(self, tmp_path: Path) -> None:
+        """inline_formula role の paragraph テキストが $LaTeX$ に置換される。"""
+        # yomitoku は escape_markdown_special_chars を通してから raw.md に書く
+        # 日本語のみの場合は変換なし。末尾に \n を追加。
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("前段落テキスト\n\nインライン数式\n\n後段落テキスト\n", encoding="utf-8")
+
+        crop_png = tmp_path / "0000.png"
+        overlay = MathOverlay(
+            items={crop_png: r"\alpha + \beta"},
+            roles={crop_png: "inline_formula"},
+            originals={crop_png: "インライン数式"},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        assert r"$\alpha + \beta$" in result.markdown
+        # 元のテキストは置換済みで残っていない
+        assert "インライン数式" not in result.markdown
+
+    def test_display_formulaが二重dollarで前後改行付き置換される(self, tmp_path: Path) -> None:
+        """display_formula role の paragraph テキストが $$LaTeX$$ に置換される。"""
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("前段落\n\n表示数式全体\n\n後段落\n", encoding="utf-8")
+
+        crop_png = tmp_path / "0001.png"
+        overlay = MathOverlay(
+            items={crop_png: r"\int_0^\infty e^{-x} dx"},
+            roles={crop_png: "display_formula"},
+            originals={crop_png: "表示数式全体"},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        assert r"$$\int_0^\infty e^{-x} dx$$" in result.markdown
+
+    def test_该当テキストがraw_mdになければRuntimeError(self, tmp_path: Path) -> None:
+        """raw.md に数式 paragraph テキストが見つからない場合は RuntimeError（Fail-Fast）。"""
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("全く無関係なテキスト\n", encoding="utf-8")
+
+        crop_png = tmp_path / "0000.png"
+        overlay = MathOverlay(
+            items={crop_png: r"\gamma"},
+            roles={crop_png: "inline_formula"},
+            originals={crop_png: "raw.mdにないテキスト"},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        with pytest.raises(
+            RuntimeError, match=r"raw\.md 中で数式 paragraph テキストが見つかりません"
+        ):
+            build_page_markdown(analysis, math_overlay=overlay)
+
+    def test_空のLaTeX_NoOp結果_はスキップされる(self, tmp_path: Path) -> None:
+        """engine が空文字を返した場合（NoOp 結果）は置換をスキップして原文を維持する。"""
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("前文\n\nスキップされる数式\n\n後文\n", encoding="utf-8")
+
+        crop_png = tmp_path / "0000.png"
+        overlay = MathOverlay(
+            items={crop_png: ""},  # 空文字 = NoOp
+            roles={crop_png: "display_formula"},
+            originals={crop_png: "スキップされる数式"},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        # 空文字はスキップされるので元テキストが残る
+        assert "スキップされる数式" in result.markdown
