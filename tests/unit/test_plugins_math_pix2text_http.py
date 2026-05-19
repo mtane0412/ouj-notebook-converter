@@ -22,6 +22,75 @@ def dummy_png(tmp_path: Path) -> Path:
     return png_path
 
 
+class TestRecognizeImage:
+    """Pix2TextHttpDetector.recognize_image の HTTP 振る舞いを検証する。"""
+
+    def test_recognize_imageはbase_urlのrecognizeエンドポイントへPOSTする(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"latex": r"\frac{1}{2}", "score": 0.95}
+        mock_post = mocker.patch("httpx.post", return_value=mock_response)
+
+        detector.recognize_image(dummy_png)
+
+        call_url = mock_post.call_args[0][0]
+        assert call_url == "http://localhost:8503/recognize"
+
+    def test_レスポンスからlatexとscoreがstrip付きで返る(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"latex": "  \\alpha  \n", "score": 0.92}
+        mocker.patch("httpx.post", return_value=mock_response)
+
+        latex, score = detector.recognize_image(dummy_png)
+
+        assert latex == r"\alpha"
+        assert score == pytest.approx(0.92)
+
+    def test_非2xxでMathEngineErrorを送出(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mocker.patch("httpx.post", return_value=mock_response)
+
+        with pytest.raises(MathEngineError, match="Pix2Text API がエラーを返しました"):
+            detector.recognize_image(dummy_png)
+
+    def test_接続失敗でMathEngineErrorを送出(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mocker.patch("httpx.post", side_effect=httpx.ConnectError("接続失敗"))
+
+        with pytest.raises(MathEngineError, match="Pix2Text API への接続に失敗"):
+            detector.recognize_image(dummy_png)
+
+    def test_タイムアウトでMathEngineErrorを送出(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mocker.patch("httpx.post", side_effect=httpx.TimeoutException("timeout"))
+
+        with pytest.raises(MathEngineError, match="Pix2Text API がタイムアウトしました"):
+            detector.recognize_image(dummy_png)
+
+    def test_不正なJSONでMathEngineErrorを送出(
+        self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("JSON parse error")
+        mock_response.text = "not json"
+        mocker.patch("httpx.post", return_value=mock_response)
+
+        with pytest.raises(MathEngineError, match="Pix2Text API レスポンスをパースできません"):
+            detector.recognize_image(dummy_png)
+
+
 class TestPix2TextHttpDetector:
     def test_detect_and_recognizeはbase_urlのdetectエンドポイントへ画像をPOSTする(
         self, detector: Pix2TextHttpDetector, dummy_png: Path, mocker: MagicMock
