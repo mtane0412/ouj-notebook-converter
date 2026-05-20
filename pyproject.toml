@@ -27,6 +27,7 @@ dependencies = [
 #       ocr extra と同一環境での併用不可。別 venv での利用を推奨。
 ocr = ["yomitoku>=0.10"]
 epub = ["pypandoc>=1.13"]
+pdf = ["reportlab>=4"]
 
 [project.scripts]
 ounc = "ouj_notebook_converter.cli:app"
@@ -72,6 +73,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pypandoc", "pypandoc.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["reportlab", "reportlab.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

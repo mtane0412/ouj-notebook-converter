@@ -129,4 +129,5 @@ def build_page_markdown(
         page_index=analysis.page_index,
         markdown=markdown_text,
         referenced_assets=existing_assets,
+        yomitoku_json_path=analysis.yomitoku_json_path,
     )
