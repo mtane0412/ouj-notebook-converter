@@ -106,6 +106,31 @@ class TestExportEpub:
         export_epub(pages, out_epub, tmp_path / "assets")
         assert out_epub.exists()
 
+    def test_HTML_imgタグのfigureが埋め込まれる(self, tmp_path: Path) -> None:
+        """yomitoku が <img src="figures/filename.png"> 形式で出力する figure の埋め込みテスト。"""
+        cache_dir = tmp_path / "cache" / "figures"
+        cache_dir.mkdir(parents=True)
+        fig = cache_dir / "raw_figure_0.png"
+        fig.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+            b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        # yomitoku が出力する相対パス形式の HTML img タグ
+        pages = [
+            _make_page(
+                0,
+                '本文\n\n<img src="figures/raw_figure_0.png" width="200px">\n',
+                figure_paths=[fig],
+            )
+        ]
+        out_epub = tmp_path / "output.epub"
+        assets_dir = tmp_path / "assets"
+        export_epub(pages, out_epub, assets_dir)
+        with zipfile.ZipFile(out_epub) as zf:
+            names = zf.namelist()
+        assert any(name.endswith(".png") for name in names)
+
     def test_figureが埋め込まれる(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()

@@ -53,18 +53,24 @@ def export_epub(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
 
-    # 全ページの figure をコピーし、絶対パス → ファイル名のみ の変換マップを構築する
+    # 全ページの figure をコピーし、絶対パス / 相対パス → ファイル名のみ の変換マップを構築する
+    # yomitoku は raw.md で <img src="figures/filename.png"> 形式（HTML タグ・相対パス）を使うため、
+    # 絶対パス文字列と "figures/filename" の両方をキーとして登録する
     path_map: dict[str, str] = {}
     for page in pages:
         for asset in page.referenced_assets:
             dest = assets_dir / asset.name
             shutil.copy2(asset, dest)
+            # 絶対パス → ファイル名のみ
             path_map[str(asset)] = asset.name
+            # "figures/filename" → ファイル名のみ（yomitoku HTML img タグの相対パス対応）
+            path_map[f"figures/{asset.name}"] = asset.name
 
     # 全ページの Markdown を結合し、figure パスをファイル名のみに書き換える
     chunks: list[str] = []
     for page in pages:
         text = _rewrite_figure_paths(page.markdown, path_map)
+        text = _rewrite_img_src(text, path_map)
         chunks.append(text)
     combined_md = "\n\n".join(chunks)
 
@@ -83,6 +89,25 @@ def export_epub(
                 f"--metadata=title:{title}",
             ],
         )
+
+
+def _rewrite_img_src(markdown: str, path_map: dict[str, str]) -> str:
+    """Markdown 内の HTML <img src="..."> タグのパスを path_map に従って書き換える。
+
+    yomitoku は figure を <img src="figures/filename.png"> 形式で出力するため、
+    Markdown 画像構文 ![alt](path) とは別に処理する。
+    """
+    if not path_map:
+        return markdown
+
+    def _replace(match: re.Match[str]) -> str:
+        before = match.group(1)
+        src = match.group(2)
+        after = match.group(3)
+        new_src = path_map.get(src, src)
+        return f'<img {before}src="{new_src}"{after}>'
+
+    return re.sub(r"<img ([^>]*)src=\"([^\"]+)\"([^>]*)>", _replace, markdown)
 
 
 def _rewrite_figure_paths(markdown: str, path_map: dict[str, str]) -> str:
