@@ -26,6 +26,10 @@ from ouj_notebook_converter.pipeline.stages.chapter_detect import (
 )
 from ouj_notebook_converter.pipeline.stages.load import load_pdf_pages
 from ouj_notebook_converter.pipeline.stages.ocr import create_analyzer
+from ouj_notebook_converter.plugins.math.server_manager import (
+    Pix2TextServerManager,
+    ServerStartupError,
+)
 from ouj_notebook_converter.utils.pages import parse_page_range
 
 app = typer.Typer(
@@ -35,6 +39,7 @@ app = typer.Typer(
 )
 
 _VALID_DEVICES = {"mps", "cpu", "cuda"}
+_DEFAULT_PIX2TEXT_VENV = Path.home() / ".venvs" / "pix2text"
 
 
 class OutputFormat(str, Enum):
@@ -66,7 +71,6 @@ class MathBackend(str, Enum):
     """数式変換バックエンドの選択肢。"""
 
     none = "none"  # 数式処理しない（デフォルト）
-    pix2tex = "pix2tex"  # yomitoku paragraph 経由 + pix2tex API 認識
     pix2text = "pix2text"  # Pix2Text API で検出・認識
 
 
@@ -105,46 +109,38 @@ def convert(
         SplitMode,
         typer.Option("--split", help="出力分割モード: none / chapters"),
     ] = SplitMode.none,
-    math: Annotated[
-        bool,
-        typer.Option(
-            "--math/--no-math",
-            help="(非推奨) --math-backend pix2tex のエイリアス。--math-backend を使用してください。",
-        ),
-    ] = False,
     math_backend: Annotated[
         MathBackend,
         typer.Option(
             "--math-backend",
-            help="数式変換バックエンド: none (デフォルト), pix2tex (yomitoku paragraph 経由), "
-            "pix2text (Pix2Text 検出+認識)",
+            help="数式変換バックエンド: none (デフォルト), pix2text (Pix2Text 検出+認識)",
         ),
     ] = MathBackend.none,
-    pix2tex_url: Annotated[
-        str,
-        typer.Option(
-            "--pix2tex-url",
-            help="pix2tex API サーバーの URL (math-backend=pix2tex 時)",
-        ),
-    ] = "http://localhost:8502",
     pix2text_url: Annotated[
         str,
         typer.Option(
             "--pix2text-url",
-            help="Pix2Text 自前ラッパー URL (math-backend=pix2text 時)。scripts/pix2text_server.py を起動しておく必要あり",
+            help="Pix2Text 自前ラッパー URL (math-backend=pix2text 時)",
         ),
     ] = "http://localhost:8503",
+    pix2text_venv: Annotated[
+        Path,
+        typer.Option(
+            "--pix2text-venv",
+            envvar="OUC_PIX2TEXT_VENV",
+            help="pix2text 用 venv のパス（デフォルト: ~/.venvs/pix2text）",
+        ),
+    ] = _DEFAULT_PIX2TEXT_VENV,
+    math_auto_start: Annotated[
+        bool,
+        typer.Option(
+            "--math-auto-start/--no-math-auto-start",
+            help="--math-backend pix2text 時にサーバーを自動起動する（デフォルト: 有効）",
+        ),
+    ] = True,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
-    # --math (deprecated) の処理
-    if math and math_backend == MathBackend.none:
-        typer.echo(
-            "警告: --math は廃止予定 (deprecated) です。代わりに --math-backend pix2tex を使用してください。",
-            err=True,
-        )
-        math_backend = MathBackend.pix2tex
-
     # --- バリデーション ---
     if outdir is None:
         typer.echo("エラー: --outdir (-o) オプションは必須です。", err=True)
@@ -165,11 +161,24 @@ def convert(
 
     # math_backend に応じたエンジンを構築する
     math_engine: Any = None
-    if math_backend == MathBackend.pix2tex:
-        from ouj_notebook_converter.plugins.math.pix2tex_http import Pix2TexHttpEngine
+    if math_backend == MathBackend.pix2text:
+        if math_auto_start:
+            manager = Pix2TextServerManager(
+                url=pix2text_url,
+                venv_path=pix2text_venv,
+                server_script=_resolve_pix2text_server_script(),
+            )
+            if not manager.is_server_alive():
+                typer.echo(
+                    "Pix2Text サーバーを起動中... (モデルロードに 10〜30 秒かかります)", err=True
+                )
+                try:
+                    manager.ensure_running()
+                except ServerStartupError as e:
+                    typer.echo(f"エラー: {e}", err=True)
+                    raise typer.Exit(code=1) from e
+                typer.echo("Pix2Text サーバーが起動しました。", err=True)
 
-        math_engine = Pix2TexHttpEngine(base_url=pix2tex_url)
-    elif math_backend == MathBackend.pix2text:
         from ouj_notebook_converter.plugins.math.pix2text_http import Pix2TextHttpDetector
 
         math_engine = Pix2TextHttpDetector(base_url=pix2text_url)
@@ -195,7 +204,6 @@ def convert(
         analyzer=analyzer,
         reading_order=reading_order.value,
         ignore_meta=ignore_meta,
-        enable_math=(math_backend != MathBackend.none),
         math_engine=math_engine,
         math_backend=math_backend.value,
     )
@@ -228,6 +236,15 @@ def convert(
                 typer.echo(f"Markdown 出力: {out_path}")
 
     typer.echo("変換が完了しました。")
+
+
+def _resolve_pix2text_server_script() -> Path:
+    """リポジトリの scripts/pix2text_server.py のパスを返す。
+
+    cli.py が src/ouj_notebook_converter/cli.py に位置することを前提に、
+    3 階層上のリポジトリルートから scripts/ を解決する。
+    """
+    return Path(__file__).parent.parent.parent / "scripts" / "pix2text_server.py"
 
 
 def _short_hash(path: Path) -> str:

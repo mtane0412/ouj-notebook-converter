@@ -21,6 +21,7 @@ IoA マッチ閾値: 0.5
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -31,7 +32,6 @@ import numpy as np
 from PIL import Image
 from yomitoku.utils.misc import save_image
 
-from ouj_notebook_converter.pipeline.stages.math_extract import MathParagraph, crop_math_image
 from ouj_notebook_converter.pipeline.types import (
     InlineParagraphReplacement,
     MathOverlay,
@@ -46,6 +46,54 @@ from ouj_notebook_converter.plugins.math.base import (
 logger = logging.getLogger(__name__)
 
 _TYPE_TO_ROLE = {"embedding": "inline_formula", "isolated": "display_formula"}
+
+
+@dataclasses.dataclass(frozen=True)
+class MathParagraph:
+    """analysis.json から抽出した数式 paragraph の情報。"""
+
+    index: int
+    role: str
+    box: tuple[int, int, int, int]
+    original_contents: str
+
+
+def crop_math_image(
+    image: np.ndarray,
+    paragraph: MathParagraph,
+    output_dir: Path,
+) -> Path:
+    """元画像から数式 paragraph の bbox をクロップして PNG として保存する。
+
+    Args:
+        image: BGR 形式の NumPy 配列（yomitoku の load_pdf が返す形式）。
+        paragraph: 抽出済みの数式 paragraph 情報。
+        output_dir: クロップ画像の保存先ディレクトリ（自動作成）。
+
+    Returns:
+        保存した PNG ファイルのパス（output_dir / f"{paragraph.index:04d}.png"）。
+
+    Raises:
+        ValueError: クランプ後の bbox サイズが 0 になった場合。
+    """
+    x1, y1, x2, y2 = paragraph.box
+    h, w = image.shape[:2]
+
+    x1 = max(0, min(x1, w))
+    x2 = max(0, min(x2, w))
+    y1 = max(0, min(y1, h))
+    y2 = max(0, min(y2, h))
+
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"数式 bbox のサイズが 0 です: box={paragraph.box}, image_size=({w}x{h})")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{paragraph.index:04d}.png"
+
+    crop = image[y1:y2, x1:x2, :]
+    save_image(crop, str(output_path))
+
+    return output_path
 _IOA_THRESHOLD = 0.5
 
 # CJK 統合漢字 + ひらがな + カタカナ（数式記号 ∑ ≤ ∈ や ASCII は範囲外）

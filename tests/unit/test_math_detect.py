@@ -431,9 +431,8 @@ class TestMathDetect:
             FormulaDetection(box=(0, 60, 100, 110), type="isolated", latex="b", score=0.8),
         ]
         detector = FakeMathDetector(detections=detections)
-        # page.png 保存と crop_math_image 内の保存を両方モック
+        # page.png 保存と crop_math_image 内の保存を両方モック（いずれも math_detect モジュール経由）
         mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_extract.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -886,7 +885,6 @@ class TestMathDetectEmbedding:
         ]
         detector = FakeMathDetector(detections=detections)
         mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_extract.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
