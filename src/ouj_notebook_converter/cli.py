@@ -251,6 +251,14 @@ def convert(
         if verbose:
             typer.echo(f"Searchable PDF 出力: {pdf_path}")
 
+    if OutputFormat.txt in effective_format:
+        from ouj_notebook_converter.exporters.plaintext import export_plaintext
+
+        txt_path = outdir / f"{book_name}.txt" if combine else outdir / book_name
+        export_plaintext(page_markdowns, txt_path, assets_dir, combine=combine)
+        if verbose:
+            typer.echo(f"TXT 出力: {txt_path}")
+
     typer.echo("変換が完了しました。")
 
 
