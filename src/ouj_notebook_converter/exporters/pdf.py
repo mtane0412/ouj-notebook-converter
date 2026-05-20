@@ -58,6 +58,8 @@ def export_pdf(
     """
     if not pages:
         raise ValueError("pages が空です。変換対象のページが存在しません。")
+    if dpi <= 0:
+        raise ValueError("dpi は 1 以上である必要があります。")
 
     try:
         import pypdfium2
@@ -80,53 +82,52 @@ def export_pdf(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     src_doc = pypdfium2.PdfDocument(str(source_pdf))
-    # page_index に対応する元PDF页のマップを作る
-    page_index_set = {p.page_index for p in pages}
 
     # reportlab Canvas の pagesize は最初のページで決定する。
     # ページごとに異なるサイズに対応するため各ページで setPageSize を呼ぶ。
     c = rl_canvas.Canvas(str(out_path))
 
-    for pm in pages:
-        page_idx = pm.page_index
-        if page_idx < len(src_doc):
-            src_page = src_doc[page_idx]
-        else:
-            # source_pdf にページが存在しない場合は最終ページで代替する
-            src_page = src_doc[len(src_doc) - 1]
+    try:
+        for pm in pages:
+            page_idx = pm.page_index
+            if page_idx < len(src_doc):
+                src_page = src_doc[page_idx]
+            else:
+                # source_pdf にページが存在しない場合は最終ページで代替する
+                src_page = src_doc[len(src_doc) - 1]
 
-        # 元PDFのページサイズ（ポイント単位）を取得する
-        page_width_pts = src_page.get_width()
-        page_height_pts = src_page.get_height()
+            # 元PDFのページサイズ（ポイント単位）を取得する
+            page_width_pts = src_page.get_width()
+            page_height_pts = src_page.get_height()
 
-        c.setPageSize((page_width_pts, page_height_pts))
+            c.setPageSize((page_width_pts, page_height_pts))
 
-        # ページを画像としてレンダリングする（DPI スケール）
-        scale = dpi / 72.0
-        bitmap = src_page.render(scale=scale)
-        pil_image = bitmap.to_pil()
-        img_bytes = io.BytesIO()
-        pil_image.save(img_bytes, format="PNG")
-        img_bytes.seek(0)
+            # ページを画像としてレンダリングする（DPI スケール）
+            scale = dpi / 72.0
+            bitmap = src_page.render(scale=scale)
+            pil_image = bitmap.to_pil()
+            img_bytes = io.BytesIO()
+            pil_image.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
 
-        # 背景として元ページ画像を配置する（ページ全体を覆う）
-        c.drawImage(
-            ImageReader(img_bytes),
-            0,
-            0,
-            width=page_width_pts,
-            height=page_height_pts,
-        )
+            # 背景として元ページ画像を配置する（ページ全体を覆う）
+            c.drawImage(
+                ImageReader(img_bytes),
+                0,
+                0,
+                width=page_width_pts,
+                height=page_height_pts,
+            )
 
-        # Yomitoku JSON が存在する場合、不可視テキストレイヤーを配置する
-        if pm.yomitoku_json_path is not None and pm.yomitoku_json_path.exists():
-            _draw_invisible_text(c, pm.yomitoku_json_path, page_height_pts, dpi)
+            # Yomitoku JSON が存在する場合、不可視テキストレイヤーを配置する
+            if pm.yomitoku_json_path is not None and pm.yomitoku_json_path.exists():
+                _draw_invisible_text(c, pm.yomitoku_json_path, page_height_pts, dpi)
 
-        c.showPage()
+            c.showPage()
 
-    c.save()
-    src_doc.close()
-    _ = page_index_set  # 将来の部分出力対応のため参照を保持
+        c.save()
+    finally:
+        src_doc.close()
 
 
 def _draw_invisible_text(
