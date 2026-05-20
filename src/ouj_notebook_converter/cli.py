@@ -235,6 +235,22 @@ def convert(
             if verbose:
                 typer.echo(f"Markdown 出力: {out_path}")
 
+    if OutputFormat.epub in effective_format:
+        from ouj_notebook_converter.exporters.epub import export_epub
+
+        epub_path = outdir / f"{book_name}.epub"
+        export_epub(page_markdowns, epub_path, assets_dir, title=book_name)
+        if verbose:
+            typer.echo(f"EPUB 出力: {epub_path}")
+
+    if OutputFormat.pdf in effective_format:
+        from ouj_notebook_converter.exporters.pdf import export_pdf
+
+        pdf_path = outdir / f"{book_name}_searchable.pdf"
+        export_pdf(page_markdowns, pdf_path, assets_dir, source_pdf=input_pdf, dpi=dpi)
+        if verbose:
+            typer.echo(f"Searchable PDF 出力: {pdf_path}")
+
     typer.echo("変換が完了しました。")
 
 

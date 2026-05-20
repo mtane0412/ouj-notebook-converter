@@ -77,6 +77,8 @@ class PageMarkdown:
     page_index: int
     markdown: str
     referenced_assets: list[Path] = field(default_factory=list)
+    # OCR オーバーレイ PDF 生成時に word bbox を読み出すための JSON パス
+    yomitoku_json_path: Path | None = None
 
 
 class ChapterKind(str, Enum):

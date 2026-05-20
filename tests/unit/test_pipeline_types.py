@@ -108,3 +108,21 @@ class TestPageMarkdown:
             referenced_assets=[],
         )
         assert pm.referenced_assets == []
+
+    def test_yomitoku_json_path_はデフォルトNone(self) -> None:
+        pm = PageMarkdown(
+            page_index=0,
+            markdown="テキストのみのページ",
+            referenced_assets=[],
+        )
+        assert pm.yomitoku_json_path is None
+
+    def test_yomitoku_json_path_を指定できる(self, tmp_path: Path) -> None:
+        json_path = tmp_path / "analysis.json"
+        pm = PageMarkdown(
+            page_index=0,
+            markdown="テキストのみのページ",
+            referenced_assets=[],
+            yomitoku_json_path=json_path,
+        )
+        assert pm.yomitoku_json_path == json_path
