@@ -7,8 +7,13 @@ Typer の CliRunner を使い、引数解釈と基本バリデーションをテ
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 from ouj_notebook_converter.cli import app
 
@@ -65,45 +70,6 @@ class TestConvertCommand:
         assert result.exit_code != 0
 
 
-class TestConvertMathFlag:
-    """--math / --pix2tex-url フラグのテスト。"""
-
-    def test_mathフラグのヘルプが表示される(self) -> None:
-        result = runner.invoke(app, ["convert", "--help"])
-        assert result.exit_code == 0
-        assert "--math" in result.output
-
-    def test_pix2tex_urlのヘルプが表示される(self) -> None:
-        result = runner.invoke(app, ["convert", "--help"])
-        assert result.exit_code == 0
-        assert "--pix2tex-url" in result.output
-
-    def test_pix2tex_urlオプションが認識される(self, tmp_path: Path) -> None:
-        # --pix2tex-url が Typer に認識されること（Unknown option エラーにならない）を確認する。
-        # PDF が存在しないので exit_code != 0 だが、pix2tex-url のパースエラーではないこと。
-        result = runner.invoke(
-            app,
-            [
-                "convert",
-                "存在しないPDF.pdf",
-                "--outdir",
-                str(tmp_path),
-                "--pix2tex-url",
-                "http://other-server:9999",
-            ],
-        )
-        assert "No such option" not in result.output
-        assert result.exit_code != 0
-
-    def test_math未指定ならpdf存在チェックで止まる(self, tmp_path: Path) -> None:
-        """--math なしで PDF が存在しない場合、pix2tex 関連のエラーは出ない。"""
-        result = runner.invoke(
-            app,
-            ["convert", "存在しないファイル.pdf", "--outdir", str(tmp_path / "out")],
-        )
-        assert result.exit_code != 0
-        assert "pix2tex" not in result.output
-
 
 class TestConvertMathBackendFlag:
     """--math-backend / --pix2text-url フラグのテスト。"""
@@ -147,19 +113,181 @@ class TestConvertMathBackendFlag:
         assert "No such option" not in result.output
         assert "invalid value" not in result.output.lower()
 
-    def test_math_True指定はdeprecation警告が出る(self, tmp_path: Path) -> None:
-        """--math (deprecated) 指定時に deprecation 警告メッセージが出ること。"""
+
+class TestMathAutoStart:
+    """--math-auto-start / --pix2text-venv オプションのテスト。"""
+
+    def test_pix2text_venvオプションが認識される(self, tmp_path: Path) -> None:
+        """--pix2text-venv オプションが Typer に認識されること。"""
         result = runner.invoke(
             app,
             [
                 "存在しないPDF.pdf",
                 "--outdir",
                 str(tmp_path),
-                "--math",
+                "--pix2text-venv",
+                str(tmp_path / "venv"),
             ],
         )
-        # PDF が存在しないので失敗するが、deprecation 警告は出ること
-        assert "deprecated" in result.output.lower() or "廃止" in result.output
+        assert "No such option" not in result.output
+
+    def test_no_math_auto_startオプションが認識される(self, tmp_path: Path) -> None:
+        """--no-math-auto-start が Typer に認識されること。"""
+        result = runner.invoke(
+            app,
+            [
+                "存在しないPDF.pdf",
+                "--outdir",
+                str(tmp_path),
+                "--no-math-auto-start",
+            ],
+        )
+        assert "No such option" not in result.output
+
+    def test_OUC_PIX2TEXT_VENV環境変数が参照される(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """環境変数 OUC_PIX2TEXT_VENV が CLI オプションとして参照される。"""
+        venv_path = tmp_path / "カスタムvenv"
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        # Pix2TextServerManager をモックして venv_path の値を捕捉する
+        captured: list[Path] = []
+
+        class FakeManager:
+            def __init__(self, url: str, venv_path: Path, server_script: Path) -> None:
+                captured.append(venv_path)
+
+            def is_server_alive(self) -> bool:
+                return True  # 既に起動中とみなす（起動中なら ensure_running は不要）
+
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            side_effect=FakeManager,
+        )
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--math-backend",
+                "pix2text",
+            ],
+            env={"OUC_PIX2TEXT_VENV": str(venv_path)},
+        )
+        # FakeManager が venv_path=カスタムvenv で初期化されたこと
+        assert len(captured) == 1
+        assert captured[0] == venv_path
+
+    def test_math_backend_pix2text時にensure_runningが呼ばれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--math-backend pix2text でサーバー未起動時に ensure_running() が呼ばれる。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.is_server_alive.return_value = False
+        # ensure_running 呼び出し後に早期終了するため RuntimeError を送出させる
+        mock_manager.ensure_running.side_effect = RuntimeError("テスト用早期終了")
+
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            return_value=mock_manager,
+        )
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--math-backend",
+                "pix2text",
+            ],
+        )
+        mock_manager.ensure_running.assert_called_once()
+
+    def test_no_math_auto_start指定時はensure_runningが呼ばれない(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--no-math-auto-start 指定時に ensure_running() が呼ばれない。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_manager = mocker.MagicMock()
+
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            return_value=mock_manager,
+        )
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--math-backend",
+                "pix2text",
+                "--no-math-auto-start",
+            ],
+        )
+        mock_manager.ensure_running.assert_not_called()
+
+    def test_ServerStartupErrorは終了コード1で処理される(
+        self, mocker: MagicMock, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        """ensure_running() が ServerStartupError を送出した場合、exit_code == 1 になる。"""
+        from ouj_notebook_converter.plugins.math.server_manager import ServerStartupError
+
+        # 実在する PDF が必要なのでダミーを作成
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_manager = mocker.MagicMock()
+        mock_manager.is_server_alive.return_value = False
+        mock_manager.ensure_running.side_effect = ServerStartupError("起動失敗テスト")
+
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            return_value=mock_manager,
+        )
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--math-backend",
+                "pix2text",
+            ],
+        )
+        assert result.exit_code == 1
+
+    def test_サーバー既起動時は起動中メッセージが出ない(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """is_server_alive() が True の場合、起動中メッセージが stderr に出ない。"""
+        mock_manager = mocker.MagicMock()
+        mock_manager.is_server_alive.return_value = True
+
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            return_value=mock_manager,
+        )
+        result = runner.invoke(
+            app,
+            [
+                "存在しないPDF.pdf",
+                "--outdir",
+                str(tmp_path),
+                "--math-backend",
+                "pix2text",
+            ],
+            mix_stderr=False,
+        )
+        assert "起動中" not in (result.output + (result.stderr or ""))
 
 
 class TestAppStructure:
