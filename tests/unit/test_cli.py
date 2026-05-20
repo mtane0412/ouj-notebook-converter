@@ -269,6 +269,9 @@ class TestMathAutoStart:
         self, mocker: MagicMock, tmp_path: Path
     ) -> None:
         """is_server_alive() が True の場合、起動中メッセージが stderr に出ない。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
         mock_manager = mocker.MagicMock()
         mock_manager.is_server_alive.return_value = True
 
@@ -279,9 +282,9 @@ class TestMathAutoStart:
         result = runner.invoke(
             app,
             [
-                "存在しないPDF.pdf",
+                str(pdf_path),
                 "--outdir",
-                str(tmp_path),
+                str(tmp_path / "out"),
                 "--math-backend",
                 "pix2text",
             ],

@@ -242,7 +242,6 @@ def _resolve_pix2text_server_script() -> Path:
     """リポジトリの scripts/pix2text_server.py のパスを返す。
 
     cli.py が src/ouj_notebook_converter/cli.py に位置することを前提に、
-    cli.py が src/ouj_notebook_converter/cli.py に位置することを前提に、
     3 階層上のリポジトリルートから scripts/ を解決する。
     """
     return Path(__file__).parent.parent.parent / "scripts" / "pix2text_server.py"
