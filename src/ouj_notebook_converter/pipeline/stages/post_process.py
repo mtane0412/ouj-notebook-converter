@@ -69,7 +69,8 @@ def _apply_math_overlay(markdown_text: str, overlay: MathOverlay) -> str:
         text = text.replace(escaped_needle, replacement, 1)
 
     # inline_formula: paragraph 内の特定 word span を $LaTeX$ に部分置換（math_detect バックエンド用）
-    for _para_idx, repl in overlay.inline_paragraphs.items():
+    # para_idx 昇順で処理することで、同一 needle が複数段落に存在する場合の誤置換を防ぐ
+    for _para_idx, repl in sorted(overlay.inline_paragraphs.items(), key=lambda kv: kv[0]):
         # word.content を各々エスケープして連結 → raw.md 上の needle
         needle_parts = [_escape_like_yomitoku(w) for w in repl.word_contents]
         needle = "".join(needle_parts)
