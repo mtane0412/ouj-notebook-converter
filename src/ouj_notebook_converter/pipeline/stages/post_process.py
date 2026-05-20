@@ -2,6 +2,10 @@
 
 OCR の生 Markdown を読み込み、数式 overlay があれば LaTeX に置換した上で PageMarkdown を返す。
 figure パスの相対→絶対変換や書き換えは行わない（exporter が担当）。
+
+数式置換の 2 系統:
+  - overlay.originals (display_formula): paragraph テキスト全体を $$LaTeX$$ に置換
+  - overlay.inline_paragraphs (inline_formula): paragraph 内の特定 word span を $LaTeX$ に部分置換
 """
 
 from __future__ import annotations
@@ -26,9 +30,12 @@ def _escape_like_yomitoku(text: str) -> str:
 def _apply_math_overlay(markdown_text: str, overlay: MathOverlay) -> str:
     """raw.md 中の数式 paragraph テキストを LaTeX 表記で置換する。
 
+    display_formula は overlay.originals 経由で paragraph 全体を置換する。
+    inline_formula は overlay.inline_paragraphs 経由で paragraph 内の特定 word を置換する。
+
     Args:
         markdown_text: raw.md の内容。
-        overlay: math_extract ステージの出力。
+        overlay: math_extract / math_detect ステージの出力。
 
     Returns:
         数式 paragraph を LaTeX に置換した Markdown 文字列。
@@ -37,6 +44,8 @@ def _apply_math_overlay(markdown_text: str, overlay: MathOverlay) -> str:
         RuntimeError: raw.md に数式 paragraph テキストが見つからない場合（Fail-Fast）。
     """
     text = markdown_text
+
+    # display_formula: paragraph 全体を LaTeX 表記で置換（math_extract バックエンド用）
     for img_path, original_contents in overlay.originals.items():
         latex = overlay.items.get(img_path, "")
         role = overlay.roles.get(img_path, "")
@@ -58,6 +67,29 @@ def _apply_math_overlay(markdown_text: str, overlay: MathOverlay) -> str:
             replacement = latex
 
         text = text.replace(escaped_needle, replacement, 1)
+
+    # inline_formula: paragraph 内の特定 word span を $LaTeX$ に部分置換（math_detect バックエンド用）
+    # para_idx 昇順で処理することで、同一 needle が複数段落に存在する場合の誤置換を防ぐ
+    for _para_idx, repl in sorted(overlay.inline_paragraphs.items(), key=lambda kv: kv[0]):
+        # word.content を各々エスケープして連結 → raw.md 上の needle
+        needle_parts = [_escape_like_yomitoku(w) for w in repl.word_contents]
+        needle = "".join(needle_parts)
+        if needle not in text:
+            raise RuntimeError(
+                f"raw.md 中でインライン数式 paragraph テキストが見つかりません: {needle[:40]!r}"
+            )
+
+        # latex_spans を start 昇順で処理し、word parts を順に置換
+        replacement_parts: list[str] = []
+        i = 0
+        for start, end, latex in sorted(repl.latex_spans, key=lambda s: s[0]):
+            replacement_parts.extend(needle_parts[i:start])
+            replacement_parts.append(f"${latex}$")
+            i = end
+        replacement_parts.extend(needle_parts[i:])
+        replacement = "".join(replacement_parts)
+
+        text = text.replace(needle, replacement, 1)
 
     return text
 

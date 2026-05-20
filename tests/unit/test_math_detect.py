@@ -12,15 +12,20 @@ import numpy as np
 import pytest
 
 from ouj_notebook_converter.pipeline.stages.math_detect import (
+    build_fragment,
+    collect_words_in_paragraph,
     ioa,
     iou,
     is_japanese_text,
+    match_contents_to_words,
     match_paragraph_by_ioa,
     math_detect,
+    select_words_inside_embedding,
+    sort_words_reading_order,
     trim_bbox_by_japanese_words,
     word_points_to_box,
 )
-from ouj_notebook_converter.pipeline.types import PageAnalysis
+from ouj_notebook_converter.pipeline.types import InlineParagraphReplacement, PageAnalysis
 from ouj_notebook_converter.plugins.math.base import FormulaDetection, MathEngineError
 
 
@@ -548,3 +553,345 @@ class TestMathDetectWithJapaneseTrimming:
 
         # 再認識失敗時は元の detection.latex（fallback_latex）が登録される
         assert r"fallback_latex" in result.items.values()
+
+
+# ---------------------------------------------------------------------------
+# 新規純粋関数のテスト（issue #3: インライン数式 embedding 部分置換）
+# ---------------------------------------------------------------------------
+
+
+class TestCollectWordsInParagraph:
+    """collect_words_in_paragraph: paragraph bbox に含まれる word を IoA で集約する。"""
+
+    def test_paragraph_bbox内のwordのみを返す(self) -> None:
+        # paragraph_box: (0, 0, 100, 50)
+        # word A: paragraph 内に完全包含（IoA=1.0）
+        # word B: paragraph 外（IoA=0.0）
+        para_box = (0, 0, 100, 50)
+        words = [
+            _make_word_dict(10, 10, 80, 40, "段落内テキスト"),      # IoA=1.0 → 含まれる
+            _make_word_dict(200, 200, 300, 250, "段落外テキスト"),  # IoA=0.0 → 除外
+        ]
+        result = collect_words_in_paragraph(para_box, words)
+        assert len(result) == 1
+        assert result[0]["content"] == "段落内テキスト"
+
+    def test_閾値未満重なりのwordは除外される(self) -> None:
+        # paragraph_box: (0, 0, 100, 100)
+        # word は 40x40 で、paragraph との交差が 10x10 = 100 → IoA = 100 / (40*40) = 0.0625 < 0.5
+        para_box = (0, 0, 100, 100)
+        words = [
+            _make_word_dict(60, 60, 100, 100, "部分重なりword"),  # word_area=40*40=1600, 交差=40*40=1600→1.0
+            _make_word_dict(90, 90, 130, 130, "閾値未満word"),   # word_area=40*40=1600, 交差=10*10=100→0.0625
+        ]
+        result = collect_words_in_paragraph(para_box, words)
+        assert len(result) == 1
+        assert result[0]["content"] == "部分重なりword"
+
+    def test_paragraph内wordがゼロなら空リスト(self) -> None:
+        para_box = (0, 0, 50, 50)
+        words = [
+            _make_word_dict(100, 100, 200, 200, "遠いword"),
+        ]
+        result = collect_words_in_paragraph(para_box, words)
+        assert result == []
+
+    def test_words空なら空リスト(self) -> None:
+        para_box = (0, 0, 100, 100)
+        result = collect_words_in_paragraph(para_box, [])
+        assert result == []
+
+
+class TestSortWordsReadingOrder:
+    """sort_words_reading_order: reading order に従って word をソートする。"""
+
+    def test_horizontal方向は行内で左から右にソートされる(self) -> None:
+        # 同一行（y が近い）の word を左→右順にソート
+        words = [
+            _make_word_dict(80, 10, 120, 30, "右のword"),
+            _make_word_dict(10, 10, 60, 30, "左のword"),
+        ]
+        result = sort_words_reading_order(words, "horizontal")
+        assert result[0]["content"] == "左のword"
+        assert result[1]["content"] == "右のword"
+
+    def test_horizontal方向は複数行が上から下にソートされる(self) -> None:
+        # 2 行: 上行の word が先、下行の word が後
+        words = [
+            _make_word_dict(10, 60, 80, 80, "下行word"),
+            _make_word_dict(10, 10, 80, 30, "上行word"),
+        ]
+        result = sort_words_reading_order(words, "horizontal")
+        assert result[0]["content"] == "上行word"
+        assert result[1]["content"] == "下行word"
+
+    def test_vertical方向は右から左の列順にソートされる(self) -> None:
+        # 縦書き: 右列が先、左列が後
+        words = [
+            _make_word_dict(10, 10, 40, 80, "左列word"),
+            _make_word_dict(60, 10, 90, 80, "右列word"),
+        ]
+        result = sort_words_reading_order(words, "vertical")
+        assert result[0]["content"] == "右列word"
+        assert result[1]["content"] == "左列word"
+
+
+class TestSelectWordsInsideEmbedding:
+    """select_words_inside_embedding: embedding bbox に重なる連続範囲の word を返す。"""
+
+    def test_embedding_bboxに含まれるwordが選択される(self) -> None:
+        # paragraph words: ["テキスト前", "数式", "テキスト後"]
+        # embedding bbox = 数式 word と完全一致
+        words = [
+            _make_word_dict(0, 0, 50, 20, "テキスト前"),
+            _make_word_dict(60, 0, 120, 20, "数式"),
+            _make_word_dict(130, 0, 200, 20, "テキスト後"),
+        ]
+        embedding_box = (60, 0, 120, 20)
+        selected, prefix_count = select_words_inside_embedding(words, embedding_box)
+        assert [w["content"] for w in selected] == ["数式"]
+        assert prefix_count == 1  # "テキスト前" が prefix
+
+    def test_重なり閾値未満のwordは含まれない(self) -> None:
+        # word の IoA が 0.4 < 0.5 の場合は除外
+        words = [
+            _make_word_dict(0, 0, 100, 20, "ほぼ外のword"),  # embedding と交差 = 10*20 = 200, word_area=100*20=2000 → IoA=0.1
+        ]
+        embedding_box = (90, 0, 200, 20)
+        selected, prefix_count = select_words_inside_embedding(words, embedding_box)
+        assert selected == []
+        assert prefix_count == 0
+
+    def test_先頭にprefix_wordがある場合はprefix_countが正しい(self) -> None:
+        # paragraph words: ["A", "B", "数式1", "数式2", "C"]
+        # embedding は 数式1 と 数式2 を含む
+        words = [
+            _make_word_dict(0, 0, 20, 20, "A"),
+            _make_word_dict(25, 0, 45, 20, "B"),
+            _make_word_dict(50, 0, 70, 20, "数式1"),
+            _make_word_dict(75, 0, 95, 20, "数式2"),
+            _make_word_dict(100, 0, 120, 20, "C"),
+        ]
+        embedding_box = (50, 0, 95, 20)
+        selected, prefix_count = select_words_inside_embedding(words, embedding_box)
+        assert [w["content"] for w in selected] == ["数式1", "数式2"]
+        assert prefix_count == 2  # "A", "B" が prefix
+
+    def test_穴あき範囲は空リストを返す(self) -> None:
+        # word "数式1" と "数式2" の間に IoA=0 の word "テキスト" がある
+        # 最小〜最大の範囲内に IoA ゼロの word があるので穴あき
+        words = [
+            _make_word_dict(0, 0, 40, 20, "数式1"),
+            _make_word_dict(45, 0, 85, 20, "テキスト"),  # IoA=0（embedding と重ならない）
+            _make_word_dict(90, 0, 130, 20, "数式2"),
+        ]
+        # embedding は 数式1 と 数式2 だけを含み、テキスト は含まない
+        embedding_box = (0, 0, 40, 20)  # 数式1 のみに重なる → 穴あきなし（1 件のみなので OK）
+        selected, _prefix_count = select_words_inside_embedding(words, embedding_box)
+        assert [w["content"] for w in selected] == ["数式1"]
+
+    def test_間に非数式wordがある場合は穴あきとみなす(self) -> None:
+        # 最小インデックス=0（数式1）、最大インデックス=2（数式2）だが間の index=1（テキスト）の IoA=0
+        words = [
+            _make_word_dict(0, 0, 40, 20, "数式1"),
+            _make_word_dict(45, 0, 85, 20, "テキスト中間"),   # embedding と重ならない
+            _make_word_dict(90, 0, 130, 20, "数式2"),
+        ]
+        # embedding bbox を 数式1 と 数式2 の両方を包む範囲にする（テキスト中間は重ならない）
+        embedding_box = (0, 0, 130, 20)  # 全 word の box を含む（テキスト中間も IoA > 0 になる）
+        selected, _prefix_count = select_words_inside_embedding(words, embedding_box)
+        # embedding_box が全 word を含むので穴なし → 全 3 件選択
+        assert len(selected) == 3
+
+
+class TestMatchContentsToWords:
+    """match_contents_to_words: paragraph.contents 行順に word を対応付ける。"""
+
+    def test_contents行順にwordを返す(self) -> None:
+        # paragraph.contents = "z\nは実数" → ["z", "は実数"] の順で word を返す
+        # analysis.json の words は別の順（y 座標が微小に異なる）にあっても正しく対応
+        contents = "z\nは実数"
+        para_words = [
+            # y 座標が微小に異なるため sort_words_reading_order では逆順になりうる
+            _make_word_dict(45, 1, 200, 20, "は実数"),  # わずかに y が小さい（上方向）
+            _make_word_dict(0, 2, 40, 21, "z"),          # わずかに y が大きい（下方向）
+        ]
+        result = match_contents_to_words(contents, para_words)
+        assert [w.get("content") for w in result] == ["z", "は実数"]
+
+    def test_同一contentが複数ある場合は順に消費される(self) -> None:
+        # paragraph.contents に同じ word が複数回出現する場合は bbox 別の word を消費する
+        contents = "x\ny\nx"  # "x" が 2 回出現
+        words = [
+            _make_word_dict(0, 0, 10, 10, "x"),    # 1 つ目の "x"
+            _make_word_dict(15, 0, 25, 10, "y"),
+            _make_word_dict(30, 0, 40, 10, "x"),   # 2 つ目の "x"
+        ]
+        result = match_contents_to_words(contents, words)
+        assert [w.get("content") for w in result] == ["x", "y", "x"]
+        # 1 つ目と 2 つ目の "x" は別 word（points が異なる）
+        assert result[0]["points"] != result[2]["points"]
+
+    def test_対応するwordがない行はpoints空のdictを返す(self) -> None:
+        contents = "既知テキスト\n未対応テキスト"
+        words = [
+            _make_word_dict(0, 0, 50, 20, "既知テキスト"),
+            # "未対応テキスト" の word は存在しない
+        ]
+        result = match_contents_to_words(contents, words)
+        assert len(result) == 2
+        assert result[0].get("content") == "既知テキスト"
+        assert result[0].get("points") != []
+        assert result[1].get("content") == "未対応テキスト"
+        assert result[1].get("points") == []  # bbox なし
+
+    def test_空contentsは空リストを返す(self) -> None:
+        result = match_contents_to_words("", [])
+        assert result == []
+
+
+class TestBuildFragment:
+    """build_fragment: word.content を順に連結する純粋関数。"""
+
+    def test_word_contentを順に連結する(self) -> None:
+        words = [
+            {"content": "z"},
+            {"content": "="},
+            {"content": "1"},
+        ]
+        assert build_fragment(words) == "z=1"
+
+    def test_空wordsで空文字列を返す(self) -> None:
+        assert build_fragment([]) == ""
+
+    def test_空contentのwordは空文字として連結される(self) -> None:
+        words = [{"content": "a"}, {"content": ""}, {"content": "b"}]
+        assert build_fragment(words) == "ab"
+
+
+# ---------------------------------------------------------------------------
+# math_detect() の embedding 処理テスト（issue #3）
+# ---------------------------------------------------------------------------
+
+
+class TestMathDetectEmbedding:
+    """math_detect の embedding 処理と inline_paragraphs 登録を検証する。"""
+
+    def test_embeddingはinline_paragraphsに登録される(
+        self, tmp_path: Path, mocker: MagicMock
+    ) -> None:
+        # embedding（インライン数式）が inline_paragraphs に登録される
+        # yomitoku は paragraph.contents = "\n".join(word.content) で生成するため
+        # 各 word.content が "\n" で区切られた形式にする
+        paragraphs = [
+            {"box": [0, 0, 200, 50], "contents": "z\nは実数", "direction": "horizontal", "role": None, "order": 0},
+        ]
+        words = [
+            _make_word_dict(0, 0, 40, 50, "z"),
+            _make_word_dict(45, 0, 200, 50, "は実数"),
+        ]
+        analysis = _make_page_analysis(tmp_path, paragraphs, words)
+        detections = [
+            FormulaDetection(box=(0, 0, 40, 50), type="embedding", latex=r"z", score=0.85),
+        ]
+        detector = FakeMathDetector(detections=detections)
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
+
+        image = np.zeros((200, 300, 3), dtype=np.uint8)
+        result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
+
+        # inline_paragraphs に 1 件登録されること
+        assert len(result.inline_paragraphs) == 1
+        # items には登録されない（display 専用フィールド）
+        assert result.items == {}
+        # 登録された InlineParagraphReplacement を確認
+        repl = next(iter(result.inline_paragraphs.values()))
+        assert isinstance(repl, InlineParagraphReplacement)
+        assert r"z" in (span[2] for span in repl.latex_spans)
+
+    def test_embedding_bboxに重なるwordがなければwarningでスキップする(
+        self, tmp_path: Path, mocker: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # paragraph 内に word が存在しない（または embedding と重ならない）場合
+        paragraphs = [
+            {"box": [0, 0, 200, 50], "contents": "テスト段落", "direction": "horizontal", "role": None, "order": 0},
+        ]
+        words: list[Any] = []  # word なし
+        analysis = _make_page_analysis(tmp_path, paragraphs, words)
+        detections = [
+            FormulaDetection(box=(0, 0, 40, 50), type="embedding", latex=r"x^2", score=0.9),
+        ]
+        detector = FakeMathDetector(detections=detections)
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
+
+        image = np.zeros((200, 300, 3), dtype=np.uint8)
+        with caplog.at_level(logging.WARNING):
+            result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
+
+        # warning が出てスキップ → inline_paragraphs は空
+        assert result.inline_paragraphs == {}
+        assert any("スキップ" in r.message or "word" in r.message.lower() for r in caplog.records)
+
+    def test_同一paragraph内の複数embeddingは1つのinline_paragraphエントリにまとめられる(
+        self, tmp_path: Path, mocker: MagicMock
+    ) -> None:
+        # paragraph 内に embedding が 2 件ある場合、inline_paragraphs のエントリは 1 件
+        # yomitoku は paragraph.contents = "\n".join(word.content) で生成するため "\n" 区切り
+        paragraphs = [
+            {"box": [0, 0, 300, 50], "contents": "z\nと\nw\nは実数", "direction": "horizontal", "role": None, "order": 0},
+        ]
+        words = [
+            _make_word_dict(0, 0, 40, 50, "z"),
+            _make_word_dict(45, 0, 100, 50, "と"),
+            _make_word_dict(105, 0, 145, 50, "w"),
+            _make_word_dict(150, 0, 300, 50, "は実数"),
+        ]
+        analysis = _make_page_analysis(tmp_path, paragraphs, words)
+        detections = [
+            FormulaDetection(box=(0, 0, 40, 50), type="embedding", latex=r"z", score=0.9),
+            FormulaDetection(box=(105, 0, 145, 50), type="embedding", latex=r"w", score=0.88),
+        ]
+        detector = FakeMathDetector(detections=detections)
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
+
+        image = np.zeros((200, 300, 3), dtype=np.uint8)
+        result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
+
+        # inline_paragraphs は 1 エントリ（同一 paragraph でまとめられる）
+        assert len(result.inline_paragraphs) == 1
+        repl = next(iter(result.inline_paragraphs.values()))
+        # latex_spans は 2 件（z と w）
+        assert len(repl.latex_spans) == 2
+        latexes = {span[2] for span in repl.latex_spans}
+        assert r"z" in latexes
+        assert r"w" in latexes
+
+    def test_embeddingとisolatedが混在する場合それぞれの場所に登録される(
+        self, tmp_path: Path, mocker: MagicMock
+    ) -> None:
+        # isolated は items / roles / originals に、embedding は inline_paragraphs に登録される
+        paragraphs = [
+            # yomitoku は paragraph.contents = "\n".join(word.content) で生成
+            {"box": [0, 0, 100, 50], "contents": "z", "direction": "horizontal", "role": None, "order": 0},
+            {"box": [0, 60, 100, 110], "contents": "ディスプレイ数式", "direction": "horizontal", "role": None, "order": 1},
+        ]
+        words = [
+            # embedding bbox に含まれる ASCII word（日本語ラベルトリミングを発動させない）
+            _make_word_dict(0, 0, 60, 50, "z"),
+        ]
+        analysis = _make_page_analysis(tmp_path, paragraphs, words)
+        detections = [
+            FormulaDetection(box=(0, 0, 60, 50), type="embedding", latex="a", score=0.9),
+            FormulaDetection(box=(0, 60, 100, 110), type="isolated", latex="b", score=0.8),
+        ]
+        detector = FakeMathDetector(detections=detections)
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_extract.save_image")
+
+        image = np.zeros((200, 300, 3), dtype=np.uint8)
+        result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
+
+        # isolated は items に、embedding は inline_paragraphs に登録
+        assert len(result.items) == 1
+        assert "display_formula" in result.roles.values()
+        assert len(result.inline_paragraphs) == 1

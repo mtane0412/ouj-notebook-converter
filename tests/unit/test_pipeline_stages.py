@@ -18,7 +18,12 @@ from ouj_notebook_converter.pipeline.stages.ocr import (
     create_analyzer,
 )
 from ouj_notebook_converter.pipeline.stages.post_process import build_page_markdown
-from ouj_notebook_converter.pipeline.types import MathOverlay, PageAnalysis, PageMarkdown
+from ouj_notebook_converter.pipeline.types import (
+    InlineParagraphReplacement,
+    MathOverlay,
+    PageAnalysis,
+    PageMarkdown,
+)
 
 # ---------------------------------------------------------------------------
 # Fake アナライザー（テスト用）
@@ -339,3 +344,119 @@ class TestBuildPageMarkdown:
 
         # 空文字はスキップされるので元テキストが残る
         assert "スキップされる数式" in result.markdown
+
+
+class TestBuildPageMarkdownInlineParagraph:
+    """inline_paragraphs を使った段落内部分置換のテスト。"""
+
+    def test_inline_paragraph部分置換でprefixとfragmentが分離されてLaTeX化される(
+        self, tmp_path: Path
+    ) -> None:
+        # raw.md にはエスケープ済みの paragraph テキストが入る
+        # paragraph words: ["z", "は実数"] → raw.md 上では "zは実数"
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("前段落\n\nzは実数\n\n後段落\n", encoding="utf-8")
+
+        repl = InlineParagraphReplacement(
+            word_contents=("z", "は実数"),
+            latex_spans=((0, 1, "z"),),  # word index 0 が数式
+        )
+        overlay = MathOverlay(
+            inline_paragraphs={0: repl},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        # "z" が "$z$" に置換され、"は実数" が残ること
+        assert "$z$は実数" in result.markdown
+        # 前後の段落は変わらない
+        assert "前段落" in result.markdown
+        assert "後段落" in result.markdown
+
+    def test_同一paragraphに複数のinline数式があれば全て置換される(
+        self, tmp_path: Path
+    ) -> None:
+        # paragraph words: ["z", "と", "w", "は実数"] → raw.md 上では "ztowは実数" ではなく "zとwは実数"
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("zとwは実数\n", encoding="utf-8")
+
+        repl = InlineParagraphReplacement(
+            word_contents=("z", "と", "w", "は実数"),
+            latex_spans=(
+                (0, 1, "z"),   # word index 0 が数式 z
+                (2, 3, "w"),   # word index 2 が数式 w
+            ),
+        )
+        overlay = MathOverlay(
+            inline_paragraphs={0: repl},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        # z と w がそれぞれ $z$ と $w$ に置換される
+        assert "$z$と$w$は実数" in result.markdown
+
+    def test_inline_paragraphとdisplay_formulaが同一ページに混在しても両方置換される(
+        self, tmp_path: Path
+    ) -> None:
+        # inline と display が同じページに共存するケース
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("zは実数\n\nディスプレイ数式全体\n", encoding="utf-8")
+
+        crop_png = tmp_path / "display.png"
+        inline_repl = InlineParagraphReplacement(
+            word_contents=("z", "は実数"),
+            latex_spans=((0, 1, "z"),),
+        )
+        overlay = MathOverlay(
+            items={crop_png: r"\frac{1}{2}"},
+            roles={crop_png: "display_formula"},
+            originals={crop_png: "ディスプレイ数式全体"},
+            inline_paragraphs={0: inline_repl},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis, math_overlay=overlay)
+
+        assert "$z$は実数" in result.markdown
+        assert r"$$\frac{1}{2}$$" in result.markdown
+
+    def test_inline_paragraphのneedleがraw_mdになければRuntimeError(
+        self, tmp_path: Path
+    ) -> None:
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("全く無関係なテキスト\n", encoding="utf-8")
+
+        repl = InlineParagraphReplacement(
+            word_contents=("raw.mdにない", "テキスト"),
+            latex_spans=((0, 1, r"\alpha"),),
+        )
+        overlay = MathOverlay(
+            inline_paragraphs={0: repl},
+        )
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        with pytest.raises(RuntimeError, match=r"raw\.md"):
+            build_page_markdown(analysis, math_overlay=overlay)
