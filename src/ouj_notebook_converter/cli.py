@@ -206,6 +206,7 @@ def convert(
         ignore_meta=ignore_meta,
         math_engine=math_engine,
         math_backend=math_backend.value,
+        no_cache=no_cache,
     )
 
     if verbose:

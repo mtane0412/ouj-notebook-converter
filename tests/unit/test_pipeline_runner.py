@@ -119,6 +119,106 @@ class TestRunPages:
         assert results[2].page_index == 2
 
 
+class TestRunPagesWithCache:
+    """run_pages のページキャッシュ機能テスト。"""
+
+    def _make_cache_files(self, page_cache_dir: Path, content: str) -> None:
+        """テスト用のキャッシュファイルを作成する。"""
+        page_cache_dir.mkdir(parents=True, exist_ok=True)
+        (page_cache_dir / "analysis.json").write_text("{}", encoding="utf-8")
+        (page_cache_dir / "raw.md").write_text(content, encoding="utf-8")
+
+    def test_キャッシュが存在する場合はanalyze_fnが呼ばれない(self, tmp_path: Path) -> None:
+        # 前提: page_0001 にキャッシュファイルが存在する
+        cache_dir = tmp_path / ".cache"
+        self._make_cache_files(cache_dir / "page_0001", "# キャッシュ済みページ\n\nキャッシュ内容\n")
+
+        fake_loader = _make_fake_loader(1)
+        fake_analyze = MagicMock()
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=cache_dir,
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            no_cache=False,
+        )
+
+        # 検証: キャッシュ存在時は analyze_fn が呼ばれない
+        run_pages(config, loader=fake_loader, analyze_fn=fake_analyze)
+
+        fake_analyze.assert_not_called()
+
+    def test_キャッシュが存在する場合はキャッシュのmarkdownが使われる(self, tmp_path: Path) -> None:
+        # 前提: キャッシュに特定内容が書かれている
+        cache_dir = tmp_path / ".cache"
+        cached_text = "# キャッシュ済みページ\n\nキャッシュ内容\n"
+        self._make_cache_files(cache_dir / "page_0001", cached_text)
+
+        fake_loader = _make_fake_loader(1)
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=cache_dir,
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            no_cache=False,
+        )
+
+        # 検証: キャッシュ内容が PageMarkdown.markdown に反映される
+        results = run_pages(config, loader=fake_loader)
+
+        assert len(results) == 1
+        assert results[0].markdown == cached_text
+
+    def test_no_cache_trueのときキャッシュがあってもanalyze_fnが呼ばれる(
+        self, tmp_path: Path
+    ) -> None:
+        # 前提: キャッシュファイルが存在するが --no-cache フラグが立っている
+        cache_dir = tmp_path / ".cache"
+        self._make_cache_files(cache_dir / "page_0001", "# 古いキャッシュ\n\n古い内容\n")
+
+        fake_loader = _make_fake_loader(1)
+        fake_analyze = _make_fake_analyze(tmp_path)
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=cache_dir,
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            no_cache=True,
+        )
+
+        # 検証: --no-cache 指定時は analyze_fn が呼ばれる
+        run_pages(config, loader=fake_loader, analyze_fn=fake_analyze)
+
+        fake_analyze.assert_called_once()
+
+    def test_キャッシュが存在しない場合はanalyze_fnが呼ばれる(self, tmp_path: Path) -> None:
+        # 前提: キャッシュディレクトリ内にファイルが存在しない
+        cache_dir = tmp_path / ".cache"
+
+        fake_loader = _make_fake_loader(1)
+        fake_analyze = _make_fake_analyze(tmp_path)
+
+        config = ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=cache_dir,
+            page_indices=[0],
+            dpi=200,
+            analyzer=MagicMock(),
+            no_cache=False,
+        )
+
+        # 検証: キャッシュ未存在時は analyze_fn が呼ばれる
+        run_pages(config, loader=fake_loader, analyze_fn=fake_analyze)
+
+        fake_analyze.assert_called_once()
+
+
 class TestRunPagesWithMath:
     """run_pages の math_extract ステージ組み込みテスト。"""
 
