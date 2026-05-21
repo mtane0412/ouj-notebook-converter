@@ -443,6 +443,40 @@ class TestMathDetect:
         assert len(result.originals) == 1
         assert "display_formula" in result.roles.values()
 
+    def test_同一paragraphへの2つ目のisolatedはスキップされ警告が出る(
+        self, tmp_path: Path, mocker: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """同一 paragraph に 2 件の isolated（display_formula）がマッチした場合、
+        1 件目は originals に登録し、2 件目は警告を出してスキップする。
+        これにより post_process での 2 回目の needle 検索失敗を防ぐ。
+        """
+        # 1 つの大きな段落（長い数式段落を想定）
+        paragraphs = [
+            {
+                "box": [0, 0, 400, 200],
+                "contents": "一様分布の数式段落テキスト",
+                "role": None,
+                "order": 0,
+            },
+        ]
+        analysis = _make_page_analysis(tmp_path, paragraphs)
+        # 同一 paragraph の bbox に 2 件の isolated 検出（Pix2Text が複数の式を検出するケース）
+        detections = [
+            FormulaDetection(box=(10, 10, 390, 100), type="isolated", latex=r"\alpha", score=0.9),
+            FormulaDetection(box=(10, 110, 390, 190), type="isolated", latex=r"\beta", score=0.85),
+        ]
+        detector = FakeMathDetector(detections=detections)
+        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
+
+        image = np.zeros((400, 500, 3), dtype=np.uint8)
+        with caplog.at_level(logging.WARNING):
+            result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
+
+        # originals に登録されるのは 1 件目のみ
+        assert len(result.originals) == 1
+        # 2 件目はスキップされ警告が出る
+        assert any("重複" in r.message or "スキップ" in r.message for r in caplog.records)
+
 
 class TestMathDetectWithJapaneseTrimming:
     """日本語ラベル混入時の bbox トリミング統合テスト。"""

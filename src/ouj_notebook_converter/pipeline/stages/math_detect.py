@@ -585,6 +585,8 @@ def math_detect(
     originals: dict[Path, str] = {}
     # paragraph インデックス → {word_contents, latex_spans の蓄積リスト}
     inline_para_builders: dict[int, tuple[tuple[str, ...], list[tuple[int, int, str]]]] = {}
+    # display_formula として既にマッチ済みの paragraph インデックス（重複登録防止）
+    display_para_indices: set[int] = set()
 
     for idx, detection in enumerate(detections):
         # yomitoku words で日本語ラベルを除外して bbox をトリミング
@@ -656,7 +658,19 @@ def math_detect(
             else:
                 inline_para_builders[para_idx] = (word_contents, [span])
         else:
-            # display_formula: 既存通り crop_math_image で登録
+            # display_formula: 同一 paragraph への重複マッチは 2 件目以降をスキップ
+            # （重複登録すると post_process で同じ needle を 2 回検索してクラッシュするため）
+            para_idx_for_display = paragraphs.index(matched_para)
+            if para_idx_for_display in display_para_indices:
+                logger.warning(
+                    "同一 paragraph への display_formula 重複マッチをスキップします: "
+                    "box=%s latex=%r",
+                    effective_box,
+                    effective_latex[:40],
+                )
+                continue
+            display_para_indices.add(para_idx_for_display)
+
             pseudo_para = MathParagraph(
                 index=idx,
                 role=role,
