@@ -30,7 +30,6 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
-from yomitoku.utils.misc import save_image
 
 from ouj_notebook_converter.pipeline.types import (
     InlineParagraphReplacement,
@@ -91,7 +90,7 @@ def crop_math_image(
     output_path = output_dir / f"{paragraph.index:04d}.png"
 
     crop = image[y1:y2, x1:x2, :]
-    save_image(crop, str(output_path))
+    Image.fromarray(crop[:, :, ::-1]).save(str(output_path))
 
     return output_path
 _IOA_THRESHOLD = 0.5
@@ -567,7 +566,7 @@ def math_detect(
 
     # ページ画像を PNG として保存（Pix2Text HTTP API に送るため）
     page_png = cache_page_dir / "page.png"
-    save_image(image, str(page_png))
+    Image.fromarray(image[:, :, ::-1]).save(str(page_png))
 
     # analysis.json の全 paragraph と words を読み込む
     data = json.loads(analysis.yomitoku_json_path.read_text(encoding="utf-8"))

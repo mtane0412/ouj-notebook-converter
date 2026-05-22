@@ -110,7 +110,7 @@ class GeminiAnalyzer:
         try:
             response = self._client.models.generate_content(
                 model=self._model,
-                contents=[
+                contents=[  # type: ignore[arg-type]
                     types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
                     _GEMINI_OCR_PROMPT,
                 ],
@@ -118,7 +118,7 @@ class GeminiAnalyzer:
         except Exception as e:
             raise RuntimeError(f"Gemini API 呼び出しに失敗しました: {e}") from e
 
-        return GeminiAnalyzerResult(response.text), None, None
+        return GeminiAnalyzerResult(response.text or ""), None, None
 
 
 def create_gemini_analyzer(

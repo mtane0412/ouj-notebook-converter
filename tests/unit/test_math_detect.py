@@ -314,7 +314,6 @@ class TestMathDetect:
     ) -> None:
         analysis = _make_page_analysis(tmp_path, [])
         detector = FakeMathDetector(detections=[])
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((100, 200, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -328,7 +327,6 @@ class TestMathDetect:
     ) -> None:
         analysis = _make_page_analysis(tmp_path, [])
         detector = FakeMathDetector(detections=[])
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((100, 200, 3), dtype=np.uint8)
         math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -346,7 +344,6 @@ class TestMathDetect:
             FormulaDetection(box=(10, 20, 100, 80), type="isolated", latex=r"E=mc^2", score=0.9),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -367,7 +364,6 @@ class TestMathDetect:
             FormulaDetection(box=(0, 0, 100, 50), type="embedding", latex=r"x^2", score=0.85),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -388,7 +384,6 @@ class TestMathDetect:
             ),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -408,7 +403,6 @@ class TestMathDetect:
             FormulaDetection(box=(500, 500, 600, 600), type="isolated", latex=r"\pi", score=0.7),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((1000, 1000, 3), dtype=np.uint8)
         with caplog.at_level(logging.WARNING):
@@ -432,7 +426,6 @@ class TestMathDetect:
         ]
         detector = FakeMathDetector(detections=detections)
         # page.png 保存と crop_math_image 内の保存を両方モック（いずれも math_detect モジュール経由）
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -466,7 +459,6 @@ class TestMathDetect:
             FormulaDetection(box=(10, 110, 390, 190), type="isolated", latex=r"\beta", score=0.85),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((400, 500, 3), dtype=np.uint8)
         with caplog.at_level(logging.WARNING):
@@ -499,7 +491,6 @@ class TestMathDetectWithJapaneseTrimming:
         ]
         detector = FakeMathDetector(detections=detections)
         recognizer = FakeMathRecognizer(latex=r"z = x_1 + 2")
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=recognizer)
@@ -525,7 +516,6 @@ class TestMathDetectWithJapaneseTrimming:
         ]
         detector = FakeMathDetector(detections=detections)
         recognizer = FakeMathRecognizer(latex=r"\text{should not appear}")
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         with caplog.at_level(logging.WARNING):
@@ -553,7 +543,6 @@ class TestMathDetectWithJapaneseTrimming:
         ]
         detector = FakeMathDetector(detections=detections)
         recognizer = FakeMathRecognizer(latex=r"\should_not_be_called")
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=recognizer)
@@ -579,7 +568,6 @@ class TestMathDetectWithJapaneseTrimming:
         ]
         detector = FakeMathDetector(detections=detections)
         recognizer = FakeFailingRecognizer()
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=recognizer)
@@ -828,7 +816,6 @@ class TestMathDetectEmbedding:
             FormulaDetection(box=(0, 0, 40, 50), type="embedding", latex=r"z", score=0.85),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -855,7 +842,6 @@ class TestMathDetectEmbedding:
             FormulaDetection(box=(0, 0, 40, 50), type="embedding", latex=r"x^2", score=0.9),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         with caplog.at_level(logging.WARNING):
@@ -885,7 +871,6 @@ class TestMathDetectEmbedding:
             FormulaDetection(box=(105, 0, 145, 50), type="embedding", latex=r"w", score=0.88),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
@@ -918,7 +903,6 @@ class TestMathDetectEmbedding:
             FormulaDetection(box=(0, 60, 100, 110), type="isolated", latex="b", score=0.8),
         ]
         detector = FakeMathDetector(detections=detections)
-        mocker.patch("ouj_notebook_converter.pipeline.stages.math_detect.save_image")
 
         image = np.zeros((200, 300, 3), dtype=np.uint8)
         result = math_detect(image, analysis, tmp_path, detector=detector, recognizer=FakeMathRecognizer())
