@@ -456,6 +456,44 @@ class TestOcrBackendOption:
         assert result.exit_code == 0
         assert "yomitoku" in result.output
 
+    def test_envファイルからapi_keyが読み込まれること(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """.env ファイルから読み込んだ GEMINI_API_KEY が create_gemini_analyzer に渡されること。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        captured_keys: list[str] = []
+
+        def fake_create(*, api_key: str, model: str) -> object:
+            captured_keys.append(api_key)
+            raise RuntimeError("テスト用早期終了")
+
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            side_effect=fake_create,
+        )
+
+        # Settings が .env から読み込んだキーを返すようにモックする
+        mock_settings = mocker.MagicMock()
+        mock_settings.gemini_api_key = "envファイルのAPIキー"
+        mocker.patch("ouj_notebook_converter.cli.Settings", return_value=mock_settings)
+
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--ocr-backend",
+                "gemini",
+                # --gemini-api-key は指定しない（.env から読む）
+            ],
+        )
+
+        assert len(captured_keys) == 1
+        assert captured_keys[0] == "envファイルのAPIキー"
+
 
 class TestAppStructure:
     """CLI アプリの基本構造テスト。"""
