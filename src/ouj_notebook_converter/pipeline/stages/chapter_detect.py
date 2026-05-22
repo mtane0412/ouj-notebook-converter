@@ -68,6 +68,15 @@ _INDEX_PATTERN = re.compile(
 )
 
 
+def _get_raw_or_markdown(page: PageMarkdown) -> str:
+    """章構造の検出に使用する Markdown テキストを返す。
+
+    数式オーバーレイ (pix2text 等) 適用前の raw_markdown がある場合はそれを優先する。
+    オーバーレイが章見出しを誤って数式と認識・置換した場合でも正しく検出できる。
+    """
+    return page.raw_markdown if page.raw_markdown is not None else page.markdown
+
+
 class ChapterDetectionError(Exception):
     """章境界の検出に失敗した場合に送出する例外。"""
 
@@ -317,7 +326,7 @@ def detect_via_ocr_toc(
     # 先頭 15 ページ以内で「目次」見出しを含むページを探す
     toc_page: PageMarkdown | None = None
     for page in page_markdowns[:15]:
-        if re.search(r"^#\s*目次\b", page.markdown, re.MULTILINE):
+        if re.search(r"^#\s*目次\b", _get_raw_or_markdown(page), re.MULTILINE):
             toc_page = page
             break
 
@@ -331,7 +340,7 @@ def detect_via_ocr_toc(
         re.MULTILINE,
     )
     entries: list[tuple[int, str, int]] = []
-    for m in entry_pattern.finditer(toc_page.markdown):
+    for m in entry_pattern.finditer(_get_raw_or_markdown(toc_page)):
         chapter_num = _parse_chapter_number(m.group(1))
         title = m.group(2).strip()
         # 目次のページ番号は書籍内ページ番号（PDF page_index とは異なる場合がある）
@@ -370,11 +379,13 @@ def _detect_via_ntitle_toc(
     Raises:
         ChapterDetectionError: 目次ページが見つからない / エントリ抽出に失敗した場合。
     """
-    ntitle_pages = [p for p in page_markdowns[:15] if _has_multiple_chapter_headings(p.markdown)]
+    ntitle_pages = [
+        p for p in page_markdowns[:15] if _has_multiple_chapter_headings(_get_raw_or_markdown(p))
+    ]
     if not ntitle_pages:
         raise ChapterDetectionError("目次ページが見つかりませんでした（先頭 15 ページ以内）。")
 
-    combined_text = "\n".join(p.markdown for p in ntitle_pages)
+    combined_text = "\n".join(_get_raw_or_markdown(p) for p in ntitle_pages)
     all_entries = _parse_ntitle_toc_entries(combined_text)
 
     if not all_entries:
@@ -513,12 +524,12 @@ def detect_via_body_headings(
 
     for page in page_markdowns:
         # ページ冒頭の H1 行のみを対象とする（本文中の H1 はノイズ）
-        first_h1 = _extract_first_h1(page.markdown)
+        first_h1 = _extract_first_h1(_get_raw_or_markdown(page))
         if first_h1 is None:
             continue
 
         # 複数の章見出しを含むページは目次などのリストページとして除外する
-        if _has_multiple_chapter_headings(page.markdown):
+        if _has_multiple_chapter_headings(_get_raw_or_markdown(page)):
             continue
 
         kind, num = _classify_heading(first_h1)

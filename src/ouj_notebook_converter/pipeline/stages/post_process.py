@@ -121,10 +121,12 @@ def build_page_markdown(
             f"raw Markdown ファイルが見つかりません: {analysis.markdown_raw_path}"
         )
 
-    markdown_text = analysis.markdown_raw_path.read_text(encoding="utf-8")
+    raw_text = analysis.markdown_raw_path.read_text(encoding="utf-8")
 
     if math_overlay is not None:
-        markdown_text = _apply_math_overlay(markdown_text, math_overlay)
+        markdown_text = _apply_math_overlay(raw_text, math_overlay)
+    else:
+        markdown_text = raw_text
 
     # referenced_assets は実際に存在する figure パスのみを含める
     existing_assets = [p for p in analysis.figure_paths if p.exists()]
@@ -134,4 +136,6 @@ def build_page_markdown(
         markdown=markdown_text,
         referenced_assets=existing_assets,
         yomitoku_json_path=analysis.yomitoku_json_path,
+        # 数式オーバーレイ適用時のみ raw を保持する（章検出が overlay の影響を受けないよう）
+        raw_markdown=raw_text if math_overlay is not None else None,
     )
