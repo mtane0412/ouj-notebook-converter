@@ -26,6 +26,7 @@ dependencies = [
 # 注意: pix2tex は timm==0.5.4 を要求し yomitoku の timm>=1.0.11 と競合するため
 #       ocr extra と同一環境での併用不可。別 venv での利用を推奨。
 ocr = ["yomitoku>=0.10"]
+gemini = ["google-genai>=1.0", "Pillow>=10.0"]
 epub = ["pypandoc>=1.13"]
 pdf = ["reportlab>=4"]
 
@@ -81,6 +82,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["reportlab", "reportlab.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["google", "google.*", "google.genai", "google.genai.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
