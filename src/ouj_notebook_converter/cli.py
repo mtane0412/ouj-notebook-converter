@@ -229,6 +229,8 @@ def convert(
                 "数式処理はスキップされます。",
                 err=True,
             )
+            math_backend = MathBackend.none
+            math_engine = None
         from ouj_notebook_converter.pipeline.stages.load_pypdfium import (
             load_pdf_pages_pypdfium2,
         )

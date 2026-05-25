@@ -339,8 +339,8 @@ class TestOcrBackendOption:
             ],
         )
         assert result.exit_code != 0
-        # エラーメッセージに GEMINI_API_KEY が言及されること
-        assert "GEMINI_API_KEY" in result.output
+        # エラーメッセージに GEMINI_API_KEY が言及されること（stderr/stdout 両方を確認）
+        assert "GEMINI_API_KEY" in result.output + (result.stderr or "")
 
     def test_GEMINI_API_KEY環境変数を使ってcreate_gemini_analyzerが呼ばれる(
         self, mocker: MagicMock, tmp_path: Path
@@ -413,8 +413,8 @@ class TestOcrBackendOption:
                 "--math-backend", "pix2text",
             ],
         )
-        # 警告が出力されること（typer.echo は stdout/stderr 混在で result.output に入る）
-        assert "警告" in result.output
+        # 警告が出力されること（typer.echo(err=True) は stderr に出るため両方を確認）
+        assert "警告" in result.output + (result.stderr or "")
 
     def test_ocr_backend_gemini時はload_pdf_pages_pypdfium2が呼ばれる(
         self, mocker: MagicMock, tmp_path: Path
