@@ -15,8 +15,8 @@ from ouj_notebook_converter.pipeline.stages.chapter_detect import (
 from ouj_notebook_converter.pipeline.types import ChapterKind, PageMarkdown
 
 
-def _make_page(page_index: int, markdown: str = "") -> PageMarkdown:
-    return PageMarkdown(page_index=page_index, markdown=markdown)
+def _make_page(page_index: int, markdown: str = "", raw_markdown: str | None = None) -> PageMarkdown:
+    return PageMarkdown(page_index=page_index, markdown=markdown, raw_markdown=raw_markdown)
 
 
 # 典型的な目次ページの Markdown
@@ -200,3 +200,28 @@ class TestDetectViaOcrTocNTitle形式:
         ]
         chapters = detect_via_ocr_toc(pages)
         assert all(c.source == "ocr_toc" for c in chapters)
+
+    def test_pix2textオーバーレイで章見出しが消えてもraw_markdownから検出できる(self) -> None:
+        """前提: pix2text が TOC ページの章見出しを誤って数式と判断し markdown から消した場合でも、
+        raw_markdown を参照することで正しく全章を検出できる。
+        再現条件: _detect_via_ntitle_toc が p.markdown ではなく p.raw_markdown を使う。
+        """
+        # 前提: TOCページ1に ch1〜ch3 を含む raw_markdown と、
+        # ch2 見出しが pix2text に消された markdown を用意する
+        toc_raw = _TOC_PAGE_NTITLE_1  # ch1, ch2, ch3 の見出しを含む正しい内容
+        # ch2 見出し行を削除（pix2text が数式として誤認識・置換した状態をシミュレート）
+        toc_overlaid = "\n".join(
+            line for line in toc_raw.splitlines() if "# 2R" not in line
+        )
+
+        # 前提: pix2text あり の実行では markdown=overlaid, raw_markdown=raw
+        pages = [
+            _make_page(0, markdown=toc_overlaid, raw_markdown=toc_raw),
+            _make_page(1, _TOC_PAGE_NTITLE_2),
+            *[_make_page(i + 2, "本文") for i in range(100)],
+        ]
+
+        # 検証: raw_markdown を使うことで ch2 も検出できる
+        chapters = detect_via_ocr_toc(pages)
+        numbers = sorted(c.chapter_number for c in chapters if c.kind == ChapterKind.CHAPTER)
+        assert 2 in numbers, f"ch2 が欠落しています: detected={numbers}"

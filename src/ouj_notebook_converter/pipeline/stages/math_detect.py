@@ -30,7 +30,6 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
-from yomitoku.utils.misc import save_image
 
 from ouj_notebook_converter.pipeline.types import (
     InlineParagraphReplacement,
@@ -91,7 +90,7 @@ def crop_math_image(
     output_path = output_dir / f"{paragraph.index:04d}.png"
 
     crop = image[y1:y2, x1:x2, :]
-    save_image(crop, str(output_path))
+    Image.fromarray(crop[:, :, ::-1]).save(str(output_path))
 
     return output_path
 _IOA_THRESHOLD = 0.5
@@ -567,7 +566,7 @@ def math_detect(
 
     # ページ画像を PNG として保存（Pix2Text HTTP API に送るため）
     page_png = cache_page_dir / "page.png"
-    save_image(image, str(page_png))
+    Image.fromarray(image[:, :, ::-1]).save(str(page_png))
 
     # analysis.json の全 paragraph と words を読み込む
     data = json.loads(analysis.yomitoku_json_path.read_text(encoding="utf-8"))
@@ -585,6 +584,8 @@ def math_detect(
     originals: dict[Path, str] = {}
     # paragraph インデックス → {word_contents, latex_spans の蓄積リスト}
     inline_para_builders: dict[int, tuple[tuple[str, ...], list[tuple[int, int, str]]]] = {}
+    # display_formula として既にマッチ済みの paragraph インデックス（重複登録防止）
+    display_para_indices: set[int] = set()
 
     for idx, detection in enumerate(detections):
         # yomitoku words で日本語ラベルを除外して bbox をトリミング
@@ -656,7 +657,19 @@ def math_detect(
             else:
                 inline_para_builders[para_idx] = (word_contents, [span])
         else:
-            # display_formula: 既存通り crop_math_image で登録
+            # display_formula: 同一 paragraph への重複マッチは 2 件目以降をスキップ
+            # （重複登録すると post_process で同じ needle を 2 回検索してクラッシュするため）
+            para_idx_for_display = paragraphs.index(matched_para)
+            if para_idx_for_display in display_para_indices:
+                logger.warning(
+                    "同一 paragraph への display_formula 重複マッチをスキップします: "
+                    "box=%s latex=%r",
+                    effective_box,
+                    effective_latex[:40],
+                )
+                continue
+            display_para_indices.add(para_idx_for_display)
+
             pseudo_para = MathParagraph(
                 index=idx,
                 role=role,

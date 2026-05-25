@@ -15,6 +15,7 @@ from typing import Annotated, Any
 
 import typer
 
+from ouj_notebook_converter.config import Settings
 from ouj_notebook_converter.exporters.markdown import (
     export_markdown,
     export_markdown_by_chapters,
@@ -72,6 +73,13 @@ class MathBackend(str, Enum):
 
     none = "none"  # 数式処理しない（デフォルト）
     pix2text = "pix2text"  # Pix2Text API で検出・認識
+
+
+class OcrBackend(str, Enum):
+    """OCR バックエンドの選択肢。"""
+
+    yomitoku = "yomitoku"  # Yomitoku（デフォルト）
+    gemini = "gemini"  # Gemini API
 
 
 @app.command()
@@ -138,6 +146,28 @@ def convert(
             help="--math-backend pix2text 時にサーバーを自動起動する（デフォルト: 有効）",
         ),
     ] = True,
+    ocr_backend: Annotated[
+        OcrBackend,
+        typer.Option(
+            "--ocr-backend",
+            help="OCR バックエンド: yomitoku (デフォルト), gemini (Gemini API)",
+        ),
+    ] = OcrBackend.yomitoku,
+    gemini_api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--gemini-api-key",
+            envvar="GEMINI_API_KEY",
+            help="Gemini API キー (--ocr-backend gemini 時に必須。GEMINI_API_KEY 環境変数でも指定可)",
+        ),
+    ] = None,
+    gemini_model: Annotated[
+        str,
+        typer.Option(
+            "--gemini-model",
+            help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.5-flash)",
+        ),
+    ] = "gemini-3.5-flash",
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -183,13 +213,38 @@ def convert(
 
         math_engine = Pix2TextHttpDetector(base_url=pix2text_url)
 
-    analyzer = create_analyzer(
-        device=device,
-        reading_order=reading_order.value,
-        ignore_meta=ignore_meta,
-    )
+    if gemini_api_key is None:
+        gemini_api_key = Settings().gemini_api_key
 
-    loader = load_pdf_pages(input_pdf, dpi=dpi)
+    if ocr_backend == OcrBackend.gemini:
+        if not gemini_api_key:
+            typer.echo(
+                "エラー: --gemini-api-key または GEMINI_API_KEY 環境変数が必要です。",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if math_backend == MathBackend.pix2text:
+            typer.echo(
+                "警告: Gemini バックエンドと pix2text の組み合わせは非推奨です。"
+                "数式処理はスキップされます。",
+                err=True,
+            )
+            math_backend = MathBackend.none
+            math_engine = None
+        from ouj_notebook_converter.pipeline.stages.load_pypdfium import (
+            load_pdf_pages_pypdfium2,
+        )
+        from ouj_notebook_converter.plugins.ocr.gemini import create_gemini_analyzer
+
+        analyzer = create_gemini_analyzer(api_key=gemini_api_key, model=gemini_model)
+        loader = load_pdf_pages_pypdfium2(input_pdf, dpi=dpi)
+    else:
+        analyzer = create_analyzer(
+            device=device,
+            reading_order=reading_order.value,
+            ignore_meta=ignore_meta,
+        )
+        loader = load_pdf_pages(input_pdf, dpi=dpi)
     page_indices_1based = parse_page_range(pages, total=loader.total_pages)
     page_indices = [p - 1 for p in page_indices_1based]  # 0-origin に変換
 
@@ -206,6 +261,7 @@ def convert(
         ignore_meta=ignore_meta,
         math_engine=math_engine,
         math_backend=math_backend.value,
+        no_cache=no_cache,
     )
 
     if verbose:

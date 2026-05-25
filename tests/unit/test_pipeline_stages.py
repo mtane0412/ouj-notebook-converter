@@ -7,6 +7,7 @@ Yomitoku の DocumentAnalyzer は重いモデルを伴うため、
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -299,15 +300,17 @@ class TestBuildPageMarkdown:
 
         assert r"$$\int_0^\infty e^{-x} dx$$" in result.markdown
 
-    def test_该当テキストがraw_mdになければRuntimeError(self, tmp_path: Path) -> None:
-        """raw.md に数式 paragraph テキストが見つからない場合は RuntimeError（Fail-Fast）。"""
+    def test_display_formulaのneedleがraw_mdになければ警告でスキップされる(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """raw.md に数式 paragraph テキストが見つからない場合は警告を出してスキップする（変換は継続）。"""
         raw_md = tmp_path / "raw.md"
         raw_md.write_text("全く無関係なテキスト\n", encoding="utf-8")
 
         crop_png = tmp_path / "0000.png"
         overlay = MathOverlay(
             items={crop_png: r"\gamma"},
-            roles={crop_png: "inline_formula"},
+            roles={crop_png: "display_formula"},
             originals={crop_png: "raw.mdにないテキスト"},
         )
         analysis = PageAnalysis(
@@ -317,10 +320,13 @@ class TestBuildPageMarkdown:
             markdown_raw_path=raw_md,
         )
 
-        with pytest.raises(
-            RuntimeError, match=r"raw\.md 中で数式 paragraph テキストが見つかりません"
-        ):
-            build_page_markdown(analysis, math_overlay=overlay)
+        with caplog.at_level(logging.WARNING):
+            result = build_page_markdown(analysis, math_overlay=overlay)
+
+        # 警告が出力されること
+        assert any("raw.md" in r.message for r in caplog.records)
+        # 置換対象が見つからなかったので元テキストは変更されない
+        assert result.markdown == "全く無関係なテキスト\n"
 
     def test_空のLaTeX_NoOp結果_はスキップされる(self, tmp_path: Path) -> None:
         """engine が空文字を返した場合（NoOp 結果）は置換をスキップして原文を維持する。"""
@@ -438,9 +444,10 @@ class TestBuildPageMarkdownInlineParagraph:
         assert "$z$は実数" in result.markdown
         assert r"$$\frac{1}{2}$$" in result.markdown
 
-    def test_inline_paragraphのneedleがraw_mdになければRuntimeError(
-        self, tmp_path: Path
+    def test_inline_paragraphのneedleがraw_mdになければ警告でスキップされる(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """inline_paragraph の needle が raw.md に見つからない場合は警告を出してスキップする（変換は継続）。"""
         raw_md = tmp_path / "raw.md"
         raw_md.write_text("全く無関係なテキスト\n", encoding="utf-8")
 
@@ -458,5 +465,10 @@ class TestBuildPageMarkdownInlineParagraph:
             markdown_raw_path=raw_md,
         )
 
-        with pytest.raises(RuntimeError, match=r"raw\.md"):
-            build_page_markdown(analysis, math_overlay=overlay)
+        with caplog.at_level(logging.WARNING):
+            result = build_page_markdown(analysis, math_overlay=overlay)
+
+        # 警告が出力されること
+        assert any("raw.md" in r.message for r in caplog.records)
+        # 置換されないので元テキストは変更されない
+        assert result.markdown == "全く無関係なテキスト\n"

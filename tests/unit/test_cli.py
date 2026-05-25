@@ -293,6 +293,208 @@ class TestMathAutoStart:
         assert "起動中" not in (result.output + (result.stderr or ""))
 
 
+class TestOcrBackendOption:
+    """--ocr-backend / --gemini-api-key / --gemini-model オプションのテスト。"""
+
+    def test_ocr_backendのヘルプが表示される(self) -> None:
+        """--ocr-backend オプションが help に含まれること。"""
+        result = runner.invoke(app, ["convert", "--help"])
+        assert result.exit_code == 0
+        assert "--ocr-backend" in result.output
+
+    def test_gemini_api_keyのヘルプが表示される(self) -> None:
+        """--gemini-api-key オプションが help に含まれること。"""
+        result = runner.invoke(app, ["convert", "--help"])
+        assert result.exit_code == 0
+        assert "--gemini-api-key" in result.output
+
+    def test_gemini_modelのヘルプが表示される(self) -> None:
+        """--gemini-model オプションが help に含まれること。"""
+        result = runner.invoke(app, ["convert", "--help"])
+        assert result.exit_code == 0
+        assert "--gemini-model" in result.output
+
+    def test_ocr_backend_gemini時にapi_key未指定はエラー(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--ocr-backend gemini で API キー未指定の場合、exit_code != 0 になること。
+
+        Note: Typer がシングルコマンドアプリとして動作するため
+        args には 'convert' サブコマンド名を含めない。
+        """
+        import os
+
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        # GEMINI_API_KEY を空に設定して「未指定」状態をシミュレートする
+        mocker.patch.dict(os.environ, {"GEMINI_API_KEY": ""})
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+            ],
+        )
+        assert result.exit_code != 0
+        # エラーメッセージに GEMINI_API_KEY が言及されること（stderr/stdout 両方を確認）
+        assert "GEMINI_API_KEY" in result.output + (result.stderr or "")
+
+    def test_GEMINI_API_KEY環境変数を使ってcreate_gemini_analyzerが呼ばれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """GEMINI_API_KEY 環境変数が create_gemini_analyzer に渡されること。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        captured_keys: list[str] = []
+
+        def fake_create(*, api_key: str, model: str) -> object:
+            captured_keys.append(api_key)
+            # 早期終了用に RuntimeError を送出する
+            raise RuntimeError("テスト用早期終了")
+
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            side_effect=fake_create,
+        )
+
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー12345",
+            ],
+        )
+
+        # create_gemini_analyzer が指定のキーで呼ばれたこと
+        assert len(captured_keys) == 1
+        assert captured_keys[0] == "テスト用APIキー12345"
+
+    def test_ocr_backend_gemini時にpix2textを指定すると警告が出る(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--ocr-backend gemini + --math-backend pix2text で警告が出力されること。
+
+        math_backend の処理は OCR backend の処理より先に実行されるため
+        Pix2TextServerManager もモックする必要がある。
+        """
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        # Pix2TextServerManager をモック（math_backend 処理が先に実行されるため）
+        mock_manager = mocker.MagicMock()
+        mock_manager.is_server_alive.return_value = True
+        mocker.patch(
+            "ouj_notebook_converter.cli.Pix2TextServerManager",
+            return_value=mock_manager,
+        )
+        mocker.patch(
+            "ouj_notebook_converter.plugins.math.pix2text_http.Pix2TextHttpDetector",
+        )
+
+        # create_gemini_analyzer は警告出力後に呼ばれる
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            side_effect=RuntimeError("テスト用早期終了"),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー",
+                "--math-backend", "pix2text",
+            ],
+        )
+        # 警告が出力されること（typer.echo(err=True) は stderr に出るため両方を確認）
+        assert "警告" in result.output + (result.stderr or "")
+
+    def test_ocr_backend_gemini時はload_pdf_pages_pypdfium2が呼ばれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--ocr-backend gemini 時に load_pdf_pages_pypdfium2 が呼ばれること。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_loader = mocker.MagicMock()
+        mock_loader.total_pages = 0
+        mock_loader.__iter__ = mocker.MagicMock(return_value=iter([]))
+
+        mock_load_pypdfium = mocker.patch(
+            "ouj_notebook_converter.pipeline.stages.load_pypdfium.load_pdf_pages_pypdfium2",
+            return_value=mock_loader,
+        )
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            return_value=mocker.MagicMock(),
+        )
+        mocker.patch("ouj_notebook_converter.cli.run_pages", return_value=[])
+        mocker.patch("ouj_notebook_converter.cli.export_markdown")
+
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー",
+            ],
+        )
+
+        mock_load_pypdfium.assert_called_once()
+
+    def test_ocr_backend_yomitokuがデフォルト(self) -> None:
+        """--ocr-backend のデフォルトが yomitoku であること。"""
+        result = runner.invoke(app, ["convert", "--help"])
+        assert result.exit_code == 0
+        assert "yomitoku" in result.output
+
+    def test_envファイルからapi_keyが読み込まれること(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """.env ファイルから読み込んだ GEMINI_API_KEY が create_gemini_analyzer に渡されること。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        captured_keys: list[str] = []
+
+        def fake_create(*, api_key: str, model: str) -> object:
+            captured_keys.append(api_key)
+            raise RuntimeError("テスト用早期終了")
+
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            side_effect=fake_create,
+        )
+
+        # Settings が .env から読み込んだキーを返すようにモックする
+        mock_settings = mocker.MagicMock()
+        mock_settings.gemini_api_key = "envファイルのAPIキー"
+        mocker.patch("ouj_notebook_converter.cli.Settings", return_value=mock_settings)
+
+        runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir",
+                str(tmp_path / "out"),
+                "--ocr-backend",
+                "gemini",
+                # --gemini-api-key は指定しない（.env から読む）
+            ],
+        )
+
+        assert len(captured_keys) == 1
+        assert captured_keys[0] == "envファイルのAPIキー"
+
+
 class TestAppStructure:
     """CLI アプリの基本構造テスト。"""
 

@@ -1,14 +1,14 @@
-"""仕様: パイプラインのページループを管理するオーケストレーター（M1: キャッシュなし）。
+"""仕様: パイプラインのページループを管理するオーケストレーター。
 
 各ページについて以下の順に処理を行う:
   1. ローダーからページ画像を取得
-  2. analyze_fn でOCRを実行（デフォルトは stages/ocr.py の analyze_page）
-  3. math_backend に応じて detect_fn で数式を LaTeX に変換
+  2. キャッシュ判定: raw.md + analysis.json が存在する場合はOCRをスキップ
+     （ConvertConfig.no_cache=True の場合は常にOCRを再実行）
+  3. analyze_fn でOCRを実行（デフォルトは stages/ocr.py の analyze_page）
+  4. math_backend に応じて detect_fn で数式を LaTeX に変換
      - "pix2text" : detect_fn（Pix2Text 検出 + 認識）
      - "none"     : スキップ
-  4. post_process でPageMarkdownを構築
-
-M2 でページ単位のキャッシュ判定ロジックをここに追加する予定。
+  5. post_process でPageMarkdownを構築
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ class ConvertConfig:
     ignore_meta: bool = False
     math_engine: Any = field(default=None)  # MathDetectorProtocol 互換オブジェクト
     math_backend: Literal["none", "pix2text"] = "none"
+    no_cache: bool = False  # True の場合はキャッシュを無視して OCR を再実行する
 
 
 def run_pages(
@@ -97,15 +98,33 @@ def run_pages(
         page_cache_dir = config.cache_dir / f"page_{raw_index + 1:04d}"
         page_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        analysis = _analyze(image, page_cache_dir, analyzer=config.analyzer)
-
-        # runner が page_index を正しく上書きする
-        analysis = PageAnalysis(
-            page_index=raw_index,
-            yomitoku_json_path=analysis.yomitoku_json_path,
-            figure_paths=analysis.figure_paths,
-            markdown_raw_path=analysis.markdown_raw_path,
+        # キャッシュ判定: raw.md と analysis.json が揃っていれば OCR をスキップする
+        json_path = page_cache_dir / "analysis.json"
+        raw_md_path = page_cache_dir / "raw.md"
+        cache_hit = (
+            not config.no_cache
+            and json_path.exists()
+            and raw_md_path.exists()
         )
+
+        if cache_hit:
+            figures_dir = page_cache_dir / "figures"
+            figure_paths = sorted(figures_dir.glob("*.png")) if figures_dir.exists() else []
+            analysis = PageAnalysis(
+                page_index=raw_index,
+                yomitoku_json_path=json_path,
+                figure_paths=figure_paths,
+                markdown_raw_path=raw_md_path,
+            )
+        else:
+            analysis = _analyze(image, page_cache_dir, analyzer=config.analyzer)
+            # runner が page_index を正しく上書きする
+            analysis = PageAnalysis(
+                page_index=raw_index,
+                yomitoku_json_path=analysis.yomitoku_json_path,
+                figure_paths=analysis.figure_paths,
+                markdown_raw_path=analysis.markdown_raw_path,
+            )
 
         overlay: MathOverlay | None = None
         if config.math_backend == "pix2text":

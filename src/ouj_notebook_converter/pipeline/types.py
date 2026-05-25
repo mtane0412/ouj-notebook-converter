@@ -79,6 +79,9 @@ class PageMarkdown:
     referenced_assets: list[Path] = field(default_factory=list)
     # OCR オーバーレイ PDF 生成時に word bbox を読み出すための JSON パス
     yomitoku_json_path: Path | None = None
+    # 数式オーバーレイ適用前の raw markdown（pix2text 使用時に設定される）
+    # 章検出では数式置換の影響を受けないよう raw_markdown を優先して参照する
+    raw_markdown: str | None = None
 
 
 class ChapterKind(str, Enum):
