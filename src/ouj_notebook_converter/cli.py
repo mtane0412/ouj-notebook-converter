@@ -15,6 +15,7 @@ from typing import Annotated, Any
 
 import typer
 
+from ouj_notebook_converter.config import Settings
 from ouj_notebook_converter.exporters.markdown import (
     export_markdown,
     export_markdown_by_chapters,
@@ -211,6 +212,9 @@ def convert(
         from ouj_notebook_converter.plugins.math.pix2text_http import Pix2TextHttpDetector
 
         math_engine = Pix2TextHttpDetector(base_url=pix2text_url)
+
+    if gemini_api_key is None:
+        gemini_api_key = Settings().gemini_api_key
 
     if ocr_backend == OcrBackend.gemini:
         if not gemini_api_key:

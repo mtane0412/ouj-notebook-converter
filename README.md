@@ -5,6 +5,7 @@
 ## 機能
 
 - yomitoku による OCR（日本語対応レイアウト解析）
+- Gemini API による OCR（yomitoku 未インストール環境向け）
 - 数式変換（Pix2Text バックエンド）
 - 章単位の Markdown 分割（`--split chapters`）
 - 読み順推定（auto / left2right / right2left / top2bottom）
@@ -38,6 +39,31 @@ uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --split chapters
 ```
 
 > **注意**: `--outdir (-o)` は必須オプションです。
+
+## Gemini OCR バックエンド
+
+yomitoku をインストールできない環境（依存関係の競合など）では、Gemini API を OCR バックエンドとして使用できる。
+
+### セットアップ
+
+プロジェクトルートに `.env` ファイルを作成し、API キーを設定する。
+
+```
+GEMINI_API_KEY=your_api_key_here
+```
+
+### 変換の実行
+
+```bash
+# .env に GEMINI_API_KEY を設定済みの場合
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini
+
+# API キーを直接指定する場合
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-api-key YOUR_KEY
+
+# モデルを変更する場合（デフォルト: gemini-3.5-flash）
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-2.0-flash
+```
 
 ## 数式変換
 
@@ -115,6 +141,9 @@ Options:
       --pix2text-venv PATH                    pix2text 用 venv のパス [env: OUC_PIX2TEXT_VENV]
                                               [default: ~/.venvs/pix2text]
       --math-auto-start/--no-math-auto-start  pix2text 時にサーバーを自動起動 [default: math-auto-start]
+      --ocr-backend [yomitoku|gemini]         OCR バックエンド [default: yomitoku]
+      --gemini-api-key TEXT                   Gemini API キー [env: GEMINI_API_KEY]
+      --gemini-model TEXT                     Gemini モデル名 [default: gemini-3.5-flash]
   -v, --verbose / -q, --quiet
 ```
 
