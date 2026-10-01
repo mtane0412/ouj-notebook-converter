@@ -62,7 +62,7 @@ uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemi
 uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-api-key YOUR_KEY
 
 # モデルを変更する場合（デフォルト: gemini-3.8-flash）
-uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-2.0-flash
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-3.5-flash
 ```
 
 ## 数式変換
