@@ -63,6 +63,12 @@ class TestTag:
 
         assert normalize_ocr_markdown(text) == text
 
+    def test_keeps_tag_only_non_equation_environment(self) -> None:
+        """equation 以外の環境（eqnarray* など）は tag だけでも変更しない。"""
+        text = "\\begin{eqnarray*}\n\\tag{1.4}\n\\end{eqnarray*}"
+
+        assert normalize_ocr_markdown(text) == text
+
 
 class TestQuad:
     """数式外に残った \\quad / \\qquad を全角スペースに置き換える。"""
