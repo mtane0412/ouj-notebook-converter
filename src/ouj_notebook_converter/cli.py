@@ -249,7 +249,10 @@ def convert(
     page_indices = [p - 1 for p in page_indices_1based]  # 0-origin に変換
 
     book_name = input_pdf.stem
-    book_cache_dir = effective_cache_dir / f"{book_name}.{_short_hash(input_pdf)}"
+    # OCR バックエンドごとに結果 JSON の内容が異なるため、キャッシュをバックエンド単位で分離する
+    book_cache_dir = (
+        effective_cache_dir / f"{book_name}.{_short_hash(input_pdf)}.{ocr_backend.value}"
+    )
 
     config = ConvertConfig(
         pdf_path=input_pdf,

@@ -505,3 +505,55 @@ class TestAppStructure:
     def test_convert_サブコマンドが存在する(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert "convert" in result.output
+
+
+class TestCacheDirPerOcrBackend:
+    """ページキャッシュが OCR バックエンドごとに分離されることのテスト（issue #13）。"""
+
+    def _invoke_and_capture_cache_dir(
+        self, mocker: MagicMock, tmp_path: Path, ocr_backend: str
+    ) -> Path:
+        """指定バックエンドで CLI を実行し、run_pages に渡された cache_dir を返す。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_loader = mocker.MagicMock()
+        mock_loader.total_pages = 1
+        mocker.patch("ouj_notebook_converter.cli.load_pdf_pages", return_value=mock_loader)
+        mocker.patch(
+            "ouj_notebook_converter.pipeline.stages.load_pypdfium.load_pdf_pages_pypdfium2",
+            return_value=mock_loader,
+        )
+        mocker.patch("ouj_notebook_converter.cli.create_analyzer")
+        mocker.patch("ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer")
+        mock_run_pages = mocker.patch("ouj_notebook_converter.cli.run_pages", return_value=[])
+        mocker.patch("ouj_notebook_converter.cli.export_markdown")
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", ocr_backend,
+                "--gemini-api-key", "テスト用APIキー",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        config = mock_run_pages.call_args.args[0]
+        cache_dir: Path = config.cache_dir
+        return cache_dir
+
+    def test_cache_dirにOCRバックエンド名が含まれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        cache_dir = self._invoke_and_capture_cache_dir(mocker, tmp_path, "gemini")
+        assert cache_dir.name.endswith(".gemini")
+
+    def test_バックエンドが異なるとcache_dirも異なる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        gemini_dir = self._invoke_and_capture_cache_dir(mocker, tmp_path, "gemini")
+        yomitoku_dir = self._invoke_and_capture_cache_dir(mocker, tmp_path, "yomitoku")
+        assert gemini_dir != yomitoku_dir
+        # 同じ PDF のキャッシュは同じ親ディレクトリ配下に並ぶこと
+        assert gemini_dir.parent == yomitoku_dir.parent
