@@ -65,6 +65,8 @@ uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemi
 uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-3.5-flash
 ```
 
+> **注意**: Gemini バックエンドは単語の位置情報（bbox）を返さないため、`--format pdf`（searchable PDF）とは併用できない。searchable PDF が必要な場合は `--ocr-backend yomitoku` を使用する。
+
 ## 数式変換
 
 数式を含む PDF には `--math-backend` オプションを使用する。

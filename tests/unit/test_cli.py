@@ -450,6 +450,35 @@ class TestOcrBackendOption:
 
         mock_load_pypdfium.assert_called_once()
 
+    def test_ocr_backend_gemini時にformat_pdfを指定するとOCR前にエラーで停止する(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """Gemini は単語 bbox を返さないため、サーチャブル PDF 出力は OCR 前に拒否されること。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        mock_create = mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+        )
+        mock_run_pages = mocker.patch("ouj_notebook_converter.cli.run_pages")
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー",
+                "--format", "pdf",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "--format pdf" in result.output + (result.stderr or "")
+        # OCR（API 呼び出し）が一切行われないこと
+        mock_create.assert_not_called()
+        mock_run_pages.assert_not_called()
+
     def test_ocr_backend_yomitokuがデフォルト(self) -> None:
         """--ocr-backend のデフォルトが yomitoku であること。"""
         result = runner.invoke(app, ["convert", "--help"])

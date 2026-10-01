@@ -73,6 +73,37 @@ class TestExportPdfValidation:
         with pytest.raises(ValueError, match="pages が空"):
             export_pdf([], tmp_path / "out.pdf", tmp_path / "assets", source_pdf=pdf_path)
 
+    def test_全ページにOCR_JSONが無い場合はValueErrorを送出しPDFを出力しない(
+        self, tmp_path: Path
+    ) -> None:
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        pages = [_make_page(0, "テスト本文テキスト", yomitoku_json_path=None)]
+        out_pdf = tmp_path / "output.pdf"
+        with pytest.raises(ValueError, match="単語"):
+            export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
+        assert not out_pdf.exists()
+
+    def test_全ページの単語が空の場合はValueErrorを送出しPDFを出力しない(
+        self, tmp_path: Path
+    ) -> None:
+        # Gemini バックエンドの analysis.json は words が常に空リストになる
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        json_path = tmp_path / "analysis.json"
+        json_path.write_text(
+            json.dumps(
+                {"backend": "gemini", "markdown": "テスト本文", "paragraphs": [], "words": []},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        pages = [_make_page(0, "テスト本文", yomitoku_json_path=json_path)]
+        out_pdf = tmp_path / "output.pdf"
+        with pytest.raises(ValueError, match="単語"):
+            export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
+        assert not out_pdf.exists()
+
 
 class TestExportPdf:
     """OCRオーバーレイPDF生成のテスト。"""
@@ -80,7 +111,9 @@ class TestExportPdf:
     def test_出力PDFファイルが作成される(self, tmp_path: Path) -> None:
         source_pdf = tmp_path / "source.pdf"
         _make_minimal_pdf(source_pdf)
-        pages = [_make_page(0, "テスト本文テキスト")]
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
+        pages = [_make_page(0, "テスト本文テキスト", yomitoku_json_path=json_path)]
         out_pdf = tmp_path / "output.pdf"
         export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
         assert out_pdf.exists()
@@ -88,7 +121,9 @@ class TestExportPdf:
     def test_出力ファイルはPDF形式である(self, tmp_path: Path) -> None:
         source_pdf = tmp_path / "source.pdf"
         _make_minimal_pdf(source_pdf)
-        pages = [_make_page(0, "テスト本文テキスト")]
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
+        pages = [_make_page(0, "テスト本文テキスト", yomitoku_json_path=json_path)]
         out_pdf = tmp_path / "output.pdf"
         export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
         # PDF ファイルのシグネチャ確認
@@ -97,8 +132,13 @@ class TestExportPdf:
     def test_yomitoku_json_pathがNoneのページも正常に処理される(self, tmp_path: Path) -> None:
         source_pdf = tmp_path / "source.pdf"
         _make_minimal_pdf(source_pdf)
-        # yomitoku_json_path=None のページ（OCR JSONなし）でもクラッシュしないこと
-        pages = [_make_page(0, "テスト", yomitoku_json_path=None)]
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
+        # 一部のページが yomitoku_json_path=None（OCR JSONなし）でもクラッシュしないこと
+        pages = [
+            _make_page(0, "テスト", yomitoku_json_path=json_path),
+            _make_page(1, "白紙ページ", yomitoku_json_path=None),
+        ]
         out_pdf = tmp_path / "output.pdf"
         export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
         assert out_pdf.read_bytes()[:4] == b"%PDF"
@@ -123,7 +163,9 @@ class TestExportPdf:
     def test_出力ディレクトリが存在しなくても作成される(self, tmp_path: Path) -> None:
         source_pdf = tmp_path / "source.pdf"
         _make_minimal_pdf(source_pdf)
-        pages = [_make_page(0, "テスト")]
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
+        pages = [_make_page(0, "テスト", yomitoku_json_path=json_path)]
         out_pdf = tmp_path / "subdir" / "output.pdf"
         export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
         assert out_pdf.exists()
@@ -141,9 +183,11 @@ class TestExportPdf:
         c.showPage()
         c.save()
 
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
         pages = [
-            _make_page(0, "1ページ目の内容"),
-            _make_page(1, "2ページ目の内容"),
+            _make_page(0, "1ページ目の内容", yomitoku_json_path=json_path),
+            _make_page(1, "2ページ目の内容", yomitoku_json_path=json_path),
         ]
         out_pdf = tmp_path / "output.pdf"
         export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
