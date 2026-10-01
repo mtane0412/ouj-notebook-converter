@@ -187,6 +187,17 @@ def convert(
         )
         raise typer.Exit(code=1)
 
+    # Gemini は単語 bbox を返さず searchable PDF のテキストレイヤーを作れないため、
+    # API を呼び出す前に組み合わせを拒否する
+    if ocr_backend == OcrBackend.gemini and format and OutputFormat.pdf in format:
+        typer.echo(
+            "エラー: --ocr-backend gemini は単語の位置情報を返さないため、"
+            "--format pdf（searchable PDF）は出力できません。"
+            "--ocr-backend yomitoku を使用してください。",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     effective_cache_dir = cache_dir or (outdir / ".cache")
 
     # math_backend に応じたエンジンを構築する

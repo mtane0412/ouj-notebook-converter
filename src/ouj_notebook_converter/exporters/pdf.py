@@ -5,6 +5,8 @@
 - Yomitoku JSON の word bbox を使って不可視テキストレイヤー（rendering mode 3）を重ねる
 - テキストレイヤーにより PDF の検索・コピーが可能になる（Adobe Acrobat OCR 相当）
 - yomitoku_json_path が None のページは背景画像のみを配置する（クラッシュしない）
+- 全ページで単語 bbox が 1 件も無い場合は、テキストの無い PDF を出力せず Fail-Fast する
+  （Gemini バックエンドは単語 bbox を返さないため、この経路で検出される）
 - reportlab は optional dep (pdf extra) のため、未インストール時は Fail-Fast で案内する
 
 座標変換:
@@ -53,13 +55,19 @@ def export_pdf(
         dpi: ページ画像のレンダリング DPI。OCR 時と同じ値を使用すること。
 
     Raises:
-        ValueError: pages が空の場合。
+        ValueError: pages が空の場合、または全ページで単語 bbox が 1 件も無い場合。
         ImportError: reportlab がインストールされていない場合。
     """
     if not pages:
         raise ValueError("pages が空です。変換対象のページが存在しません。")
     if dpi <= 0:
         raise ValueError("dpi は 1 以上である必要があります。")
+    if not any(_has_words(pm.yomitoku_json_path) for pm in pages):
+        raise ValueError(
+            "全ページで OCR 結果の単語 bbox が見つかりません。"
+            "テキストレイヤーを作れないため searchable PDF を出力できません。"
+            "単語 bbox を出力する OCR バックエンド（yomitoku）で変換してください。"
+        )
 
     try:
         import pypdfium2
@@ -128,6 +136,21 @@ def export_pdf(
         c.save()
     finally:
         src_doc.close()
+
+
+def _has_words(json_path: Path | None) -> bool:
+    """OCR 結果 JSON に不可視テキストとして描画できる単語が 1 件以上あるかを判定する。
+
+    Args:
+        json_path: OCR 結果の JSON ファイルパス。None または存在しない場合は False。
+
+    Returns:
+        content と points を両方持つ単語が 1 件以上あれば True。
+    """
+    if json_path is None or not json_path.exists():
+        return False
+    data: dict[str, Any] = json.loads(json_path.read_text(encoding="utf-8"))
+    return any(w.get("content") and w.get("points") for w in data.get("words", []))
 
 
 def _draw_invisible_text(
