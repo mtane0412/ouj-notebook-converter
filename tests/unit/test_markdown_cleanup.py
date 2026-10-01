@@ -85,6 +85,18 @@ class TestQuad:
 
         assert normalize_ocr_markdown(text) == text
 
+    def test_keeps_quad_inside_parenthesis_delimited_math(self) -> None:
+        """\\(...\\) で囲まれたインライン数式内の quad は変更しない。"""
+        text = "解は \\(x = 1 \\quad y = 2\\) である。"
+
+        assert normalize_ocr_markdown(text) == text
+
+    def test_keeps_hfill_inside_bracket_delimited_math(self) -> None:
+        """\\[...\\] で囲まれたディスプレイ数式内の hfill は変更しない。"""
+        text = "次の式が成り立つ。\n\\[\na + b = c \\hfill (1.1)\n\\]\n"
+
+        assert normalize_ocr_markdown(text) == text
+
 
 class TestSectionHeading:
     """節番号（N.M）を持つ見出しのレベルを ## に揃える。"""
@@ -164,6 +176,30 @@ class TestCodeFence:
         text = "```\n### 例 1.1\n\\hfill \\tag{1.1}\n```"
 
         assert normalize_ocr_markdown(text) == text
+
+    def test_keeps_indented_code_fence_content(self) -> None:
+        """3 文字までインデントされたコードフェンス内も変更しない。"""
+        text = "   ```\n   ### 例 1.1\n   ```\n\n### 例 1.2"
+
+        assert normalize_ocr_markdown(text) == "   ```\n   ### 例 1.1\n   ```\n\n**例 1.2**"
+
+    def test_keeps_tilde_code_fence_content(self) -> None:
+        """~~~ で囲まれたコードフェンス内も変更しない。"""
+        text = "~~~\n### 例 1.1\n~~~"
+
+        assert normalize_ocr_markdown(text) == text
+
+    def test_closes_fence_only_with_matching_marker(self) -> None:
+        """開きと異なる記号や短い記号の行ではフェンスを閉じない。"""
+        text = "````\n```\n### 例 1.1\n~~~~\n````\n### 例 1.2"
+
+        assert normalize_ocr_markdown(text) == "````\n```\n### 例 1.1\n~~~~\n````\n**例 1.2**"
+
+    def test_keeps_unclosed_code_fence_until_end(self) -> None:
+        """閉じられていないコードフェンスは文書末尾までを保護する。"""
+        text = "本文 \\hfill (1.1)\n```\n### 例 1.1\n\\hfill"
+
+        assert normalize_ocr_markdown(text) == "本文 (1.1)\n```\n### 例 1.1\n\\hfill"
 
 
 class TestNoChange:

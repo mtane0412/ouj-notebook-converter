@@ -22,12 +22,16 @@ from __future__ import annotations
 
 import re
 
-# コードフェンス（``` で囲まれたブロック）。中身は図のテキスト表現なので保護する
-_CODE_FENCE = re.compile(r"^```[^\n]*\n[\s\S]*?^```[^\n]*$", re.MULTILINE)
+# コードフェンスの開始行（CommonMark 準拠: 3 文字までの字下げ、``` または ~~~ を 3 個以上）。
+# バッククォートのフェンスは info string にバッククォートを含められない
+_CODE_FENCE_OPEN = re.compile(r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)$")
 
-# 数式スパン: ディスプレイ数式 / 数式外に置かれた LaTeX 環境 / インライン数式（\$ は除外）
+# 数式スパン: ディスプレイ数式（$$ / \[ \]）/ 数式外に置かれた LaTeX 環境 /
+# インライン数式（\( \) / $、ただし \$ は除外）
 _MATH_SPAN = re.compile(
     r"\$\$[\s\S]+?\$\$"
+    r"|\\\[[\s\S]+?\\\]"
+    r"|\\\([\s\S]+?\\\)"
     r"|\\begin\{([a-zA-Z*]+)\}[\s\S]+?\\end\{\1\}"
     r"|(?<!\\)\$[^$\n]+?(?<!\\)\$"
 )
@@ -101,6 +105,48 @@ def _normalize_chunk(text: str) -> str:
     return "".join(parts)
 
 
+def _is_code_fence_close(line: str, opening: str) -> bool:
+    """行が開始フェンス opening を閉じるフェンスかを判定する。
+
+    閉じフェンスは開始と同じ記号で、開始以上の長さを持ち、後ろに空白以外を含まない。
+    """
+    stripped = line.rstrip("\n")
+    indent = len(stripped) - len(stripped.lstrip(" "))
+    if indent > 3:
+        return False
+    body = stripped.strip(" \t")
+    return len(body) >= len(opening) and body == opening[0] * len(body)
+
+
+def _split_code_fences(markdown: str) -> list[tuple[str, bool]]:
+    """Markdown をコードフェンス内外の断片に分割する。
+
+    Returns:
+        (断片, コードフェンス内か) のリスト。閉じられていないフェンスは文書末尾までをフェンス内とする。
+    """
+    segments: list[tuple[str, bool]] = []
+    buffer: list[str] = []
+    opening: str | None = None
+    for line in markdown.splitlines(keepends=True):
+        if opening is None:
+            fence_open = _CODE_FENCE_OPEN.match(line.rstrip("\n"))
+            if fence_open is None:
+                buffer.append(line)
+                continue
+            # フェンス開始行からはフェンス内の断片として扱う
+            segments.append(("".join(buffer), False))
+            buffer = [line]
+            opening = fence_open.group(1) or fence_open.group(2)
+            continue
+        buffer.append(line)
+        if _is_code_fence_close(line, opening):
+            segments.append(("".join(buffer), True))
+            buffer = []
+            opening = None
+    segments.append(("".join(buffer), opening is not None))
+    return segments
+
+
 def normalize_ocr_markdown(markdown: str) -> str:
     """OCR 由来のページ Markdown に残る LaTeX 残骸と見出しレベルの揺れを正規化する。
 
@@ -110,11 +156,7 @@ def normalize_ocr_markdown(markdown: str) -> str:
     Returns:
         正規化後の Markdown 文字列。破綻が無ければ入力と同一の文字列を返す。
     """
-    parts: list[str] = []
-    last_end = 0
-    for fence in _CODE_FENCE.finditer(markdown):
-        parts.append(_normalize_chunk(markdown[last_end : fence.start()]))
-        parts.append(fence.group(0))
-        last_end = fence.end()
-    parts.append(_normalize_chunk(markdown[last_end:]))
-    return "".join(parts)
+    return "".join(
+        segment if in_fence else _normalize_chunk(segment)
+        for segment, in_fence in _split_code_fences(markdown)
+    )
