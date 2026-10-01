@@ -61,8 +61,8 @@ uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemi
 # API キーを直接指定する場合
 uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-api-key YOUR_KEY
 
-# モデルを変更する場合（デフォルト: gemini-3.5-flash）
-uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-2.0-flash
+# モデルを変更する場合（デフォルト: gemini-3.8-flash）
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-3.5-flash
 ```
 
 ## 数式変換
@@ -143,7 +143,7 @@ Options:
       --math-auto-start/--no-math-auto-start  pix2text 時にサーバーを自動起動 [default: math-auto-start]
       --ocr-backend [yomitoku|gemini]         OCR バックエンド [default: yomitoku]
       --gemini-api-key TEXT                   Gemini API キー [env: GEMINI_API_KEY]
-      --gemini-model TEXT                     Gemini モデル名 [default: gemini-3.5-flash]
+      --gemini-model TEXT                     Gemini モデル名 [default: gemini-3.8-flash]
   -v, --verbose / -q, --quiet
 ```
 

@@ -165,9 +165,9 @@ def convert(
         str,
         typer.Option(
             "--gemini-model",
-            help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.5-flash)",
+            help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.8-flash)",
         ),
-    ] = "gemini-3.5-flash",
+    ] = "gemini-3.8-flash",
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
