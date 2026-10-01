@@ -320,8 +320,8 @@ class TestCreateGeminiAnalyzer:
 
         assert isinstance(analyzer, gemini_module.GeminiAnalyzer)
 
-    def test_デフォルトモデルはgemini_3_5_flash(self) -> None:
-        """デフォルトモデルが gemini-3.5-flash であること。"""
+    def test_デフォルトモデルはgemini_3_8_flash(self) -> None:
+        """デフォルトモデルが gemini-3.8-flash であること。"""
         mock_genai = _build_mock_genai()
         mock_types = MagicMock()
 
@@ -340,4 +340,4 @@ class TestCreateGeminiAnalyzer:
             importlib.reload(gemini_module)
             analyzer = gemini_module.create_gemini_analyzer(api_key="テスト用APIキー")
 
-        assert analyzer._model == "gemini-3.5-flash"
+        assert analyzer._model == "gemini-3.8-flash"

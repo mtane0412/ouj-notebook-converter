@@ -84,7 +84,7 @@ class GeminiAnalyzer:
     AnalyzerProtocol を実装し、既存パイプラインの analyzer として差し込める。
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-3.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.8-flash") -> None:
         from google import genai
 
         self._client = genai.Client(api_key=api_key)
@@ -124,13 +124,13 @@ class GeminiAnalyzer:
 def create_gemini_analyzer(
     *,
     api_key: str,
-    model: str = "gemini-3.5-flash",
+    model: str = "gemini-3.8-flash",
 ) -> GeminiAnalyzer:
     """GeminiAnalyzer を生成するファクトリ関数。
 
     Args:
         api_key: Gemini API キー。
-        model: 使用するモデル名（デフォルト: gemini-3.5-flash）。
+        model: 使用するモデル名（デフォルト: gemini-3.8-flash）。
 
     Returns:
         GeminiAnalyzer インスタンス。
