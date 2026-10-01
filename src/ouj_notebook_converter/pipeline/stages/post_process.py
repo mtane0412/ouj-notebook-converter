@@ -1,6 +1,7 @@
 """仕様: PageAnalysis を PageMarkdown に変換する後処理ステージ。
 
-OCR の生 Markdown を読み込み、数式 overlay があれば LaTeX に置換した上で PageMarkdown を返す。
+OCR の生 Markdown を読み込み、数式 overlay があれば LaTeX に置換し、
+OCR 由来の LaTeX 残骸・見出しレベルの揺れを正規化した上で PageMarkdown を返す。
 figure パスの相対→絶対変換や書き換えは行わない（exporter が担当）。
 
 数式置換の 2 系統:
@@ -13,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 
+from ouj_notebook_converter.pipeline.stages.markdown_cleanup import normalize_ocr_markdown
 from ouj_notebook_converter.pipeline.types import MathOverlay, PageAnalysis, PageMarkdown
 
 logger = logging.getLogger(__name__)
@@ -127,6 +129,7 @@ def build_page_markdown(
         markdown_text = _apply_math_overlay(raw_text, math_overlay)
     else:
         markdown_text = raw_text
+    markdown_text = normalize_ocr_markdown(markdown_text)
 
     # referenced_assets は実際に存在する figure パスのみを含める
     existing_assets = [p for p in analysis.figure_paths if p.exists()]

@@ -252,6 +252,21 @@ class TestBuildPageMarkdown:
 
         assert result.markdown == "本文テキスト\n"
 
+    def test_normalizes_ocr_latex_residue_and_heading_levels(self, tmp_path: Path) -> None:
+        """raw.md 中の \\hfill と見出し化された例ラベルが markdown では正規化される。"""
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text("### 例 4.4\n\n逆になる。 \\hfill (1.22)\n", encoding="utf-8")
+        analysis = PageAnalysis(
+            page_index=0,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+        result = build_page_markdown(analysis)
+
+        assert result.markdown == "**例 4.4**\n\n逆になる。 (1.22)\n"
+
     def test_inline_formulaがdollar囲みで置換される(self, tmp_path: Path) -> None:
         """inline_formula role の paragraph テキストが $LaTeX$ に置換される。"""
         # yomitoku は escape_markdown_special_chars を通してから raw.md に書く
