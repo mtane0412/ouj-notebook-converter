@@ -1,0 +1,9 @@
+{
+  "name": "ouj-katex-check",
+  "private": true,
+  "description": "評価スクリプト（ouj_notebook_converter.evaluation）が数式の KaTeX 描画可否を検査するための Node.js 補助スクリプト",
+  "type": "module",
+  "dependencies": {
+    "katex": "0.18.9"
+  }
+}
