@@ -204,6 +204,12 @@ class TestCheckLink:
         monkeypatch.setattr(equation_check, "_evaluate_variants", slow_evaluation)
         assert self._check("a + b", "=", "b + a") == LinkStatus.SKIPPED_TIMEOUT
 
+    def test_fails_fast_without_sigalrm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SIGALRM の無い環境（Windows）では時間制限を黙って外さず、例外で停止する。"""
+        monkeypatch.delattr(equation_check.signal, "SIGALRM")
+        with pytest.raises(RuntimeError, match="SIGALRM"):
+            self._check("a + b", "=", "b + a")
+
     @pytest.mark.parametrize("relation", [r"\le", r"\leq", r"\leqq", r"\ge", r"\geq", r"\geqq"])
     def test_all_aliases_of_non_strict_inequality(self, relation: str) -> None:
         """等号付き不等号の別名をすべて検算できる。"""

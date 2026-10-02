@@ -270,6 +270,7 @@ def check_link(link: Link) -> LinkStatus:
         検算結果。判定の規則はモジュールの docstring を参照。
 
     Raises:
+        RuntimeError: SIGALRM の無い環境（Windows など）で呼び出した場合。
         ValueError: メインスレッド以外から呼び出した場合（SIGALRM を設定できないため）。
     """
     return _with_time_limit(lambda: _check_link(link))
@@ -277,6 +278,9 @@ def check_link(link: Link) -> LinkStatus:
 
 def _with_time_limit(check: Callable[[], LinkStatus]) -> LinkStatus:
     """check を LINK_TIMEOUT_SECONDS 以内で実行し、超えたら SKIPPED_TIMEOUT を返す。"""
+    if not hasattr(signal, "SIGALRM"):
+        # 時間制限なしで続けると総和などで処理が終わらなくなるため、黙って続けずに停止する
+        raise RuntimeError("この環境には SIGALRM が無いため、時間制限付きの検算を実行できません")
 
     def on_alarm(_signum: int, _frame: FrameType | None) -> None:
         raise _LinkTimeoutError
