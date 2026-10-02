@@ -33,3 +33,6 @@ out/
 
 # macOS
 .DS_Store
+
+# Node.js（scripts/katex_check の依存）
+node_modules/

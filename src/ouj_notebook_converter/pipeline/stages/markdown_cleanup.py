@@ -27,8 +27,8 @@ import re
 _CODE_FENCE_OPEN = re.compile(r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)$")
 
 # 数式スパン: ディスプレイ数式（$$ / \[ \]）/ 数式外に置かれた LaTeX 環境 /
-# インライン数式（\( \) / $、ただし \$ は除外）
-_MATH_SPAN = re.compile(
+# インライン数式（\( \) / $、ただし \$ は除外）。評価（evaluation.markdown_parts）でも共用する
+MATH_SPAN = re.compile(
     r"\$\$[\s\S]+?\$\$"
     r"|\\\[[\s\S]+?\\\]"
     r"|\\\([\s\S]+?\\\)"
@@ -97,7 +97,7 @@ def _normalize_chunk(text: str) -> str:
 
     parts: list[str] = []
     last_end = 0
-    for math in _MATH_SPAN.finditer(text):
+    for math in MATH_SPAN.finditer(text):
         parts.append(_normalize_prose(text[last_end : math.start()]))
         parts.append(_normalize_math_span(math.group(0)))
         last_end = math.end()
@@ -118,7 +118,7 @@ def _is_code_fence_close(line: str, opening: str) -> bool:
     return len(body) >= len(opening) and body == opening[0] * len(body)
 
 
-def _split_code_fences(markdown: str) -> list[tuple[str, bool]]:
+def split_code_fences(markdown: str) -> list[tuple[str, bool]]:
     """Markdown をコードフェンス内外の断片に分割する。
 
     Returns:
@@ -158,5 +158,5 @@ def normalize_ocr_markdown(markdown: str) -> str:
     """
     return "".join(
         segment if in_fence else _normalize_chunk(segment)
-        for segment, in_fence in _split_code_fences(markdown)
+        for segment, in_fence in split_code_fences(markdown)
     )
