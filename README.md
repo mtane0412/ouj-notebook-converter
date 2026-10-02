@@ -170,6 +170,25 @@ uv run ruff check src tests
 uv run ruff format src tests
 ```
 
+### 精度評価
+
+人手で作成した正解 Markdown（評価セット）と OCR 出力を比較し、精度指標を算出する。
+評価セットは教材の著作物を含むためリポジトリには置かず、場所を `--truth` で指定する。
+
+```bash
+# 初回のみ: KaTeX 描画検査用の Node.js 依存をインストール
+(cd scripts/katex_check && npm install)
+
+uv run python -m ouj_notebook_converter.evaluation \
+  --truth /path/to/eval \
+  --pred /path/to/output_or_cache \
+  --json result.json
+```
+
+- `--truth`: `manifest.json`（`{"pages": [{"page": 70, "category": "数式中心"}]}`）と正解 `page_NNNN.md` を置いたディレクトリ
+- `--pred`: `ounc --no-combine` の出力ディレクトリ、またはページキャッシュ（`page_NNNN/raw.md`）のディレクトリ
+- 指標: 地の文の文字誤り率（CER）、数式の一致率（F1）と文字誤り率、見出し（レベル・テキスト）の一致率（F1）、KaTeX で描画できない数式の件数。ページ別・層別・全体で表示する
+
 ## アーキテクチャ概要
 
 ```
