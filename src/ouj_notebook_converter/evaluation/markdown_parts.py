@@ -8,6 +8,8 @@
   - 数式の検出には変換時の後処理（markdown_cleanup）と同じ正規表現を使う
   - NFKC 正規化により全角・半角の違い（「，」と「,」など）は誤りとして数えない
   - コードフェンス内の行は見出しとして扱わないが、地の文には含める（図中の文字も本文の一部とみなす）
+  - 数式内の \\text{...} の中身と \\tag{X}（「(X)」として）は地の文として扱う。OCR が日本語や
+    式番号を数式の中に入れても外に出しても、同じ地の文・同じ数式として比較するため
 """
 
 from __future__ import annotations
@@ -67,6 +69,8 @@ _EMPHASIS = re.compile(r"\*+|_{2,}")
 # バックスラッシュエスケープされた ASCII 記号（\* → *）
 _ESCAPED_PUNCTUATION = re.compile(r"\\([!-/:-@\[-`{-~])")
 _WHITESPACE = re.compile(r"\s+")
+# 数式内の地の文: \text{...} 系の命令と式番号 \tag{...}
+_PROSE_IN_MATH = re.compile(r"\\(?:text|textrm|mbox)\{([^{}]*)\}|\\tag\*?\{([^{}]*)\}")
 
 # LaTeX のトークン: 命令（\frac）/ 1 文字のエスケープ（\, や \\）/ 空白
 _LATEX_TOKEN = re.compile(r"\\[a-zA-Z]+|\\.|\s+", re.DOTALL)
@@ -107,8 +111,8 @@ def split_markdown(markdown: str) -> MarkdownParts:
         分解結果。
     """
     formulas = tuple(_to_formula(match.group(0)) for match in MATH_SPAN.finditer(markdown))
-    # 数式の位置を空白に置き換えてから行単位で記法を除く（数式は複数行にまたがりうるため先に除く）
-    without_math = MATH_SPAN.sub(" ", markdown)
+    # 数式を「数式内の地の文」に置き換えてから行単位で記法を除く（数式は複数行にまたがりうるため先に除く）
+    without_math = MATH_SPAN.sub(lambda m: f" {_prose_in_math(m.group(0))} ", markdown)
 
     prose_lines: list[str] = []
     headings: list[Heading] = []
@@ -136,7 +140,8 @@ def split_markdown(markdown: str) -> MarkdownParts:
 def normalize_latex(tex: str) -> str:
     """数式を比較するため、表示に影響しない表記の違いを取り除いた LaTeX 文字列を返す。
 
-    空白・間隔調整命令・\\left/\\right・末尾の句読点を除き、\\dfrac→\\frac などの別名を統一する。
+    地の文として扱う \\text{...}・\\tag{...}、空白・間隔調整命令・\\left/\\right・末尾の句読点を除き、
+    \\dfrac→\\frac などの別名を統一する。日本語だけの数式は空文字列になる。
     根指数や添字など数学的な意味が変わる違いは残す。
 
     Args:
@@ -152,7 +157,8 @@ def normalize_latex(tex: str) -> str:
             return ""
         return _LATEX_ALIASES.get(token, token)
 
-    normalized = _LATEX_TOKEN.sub(replace, unicodedata.normalize("NFKC", tex))
+    without_prose = _PROSE_IN_MATH.sub("", unicodedata.normalize("NFKC", tex))
+    normalized = _LATEX_TOKEN.sub(replace, without_prose)
     return _TRAILING_PUNCTUATION.sub("", normalized)
 
 
@@ -167,6 +173,14 @@ def _to_formula(span: str) -> Formula:
     if span.startswith("\\begin"):
         return Formula(tex=span, display=True)
     return Formula(tex=span[1:-1].strip(), display=False)
+
+
+def _prose_in_math(span: str) -> str:
+    """数式中の \\text{...} の中身と \\tag{X}（「(X)」として）を出現順に連結して返す。"""
+    return " ".join(
+        m.group(1) if m.group(1) is not None else f"({m.group(2)})"
+        for m in _PROSE_IN_MATH.finditer(span)
+    )
 
 
 def _strip_markup(line: str) -> str:

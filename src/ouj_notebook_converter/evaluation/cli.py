@@ -60,7 +60,7 @@ def evaluate(
 def _build_table(report: DatasetReport) -> Table:
     """ページ別・層別・全体の指標を 1 つの表にまとめる。"""
     table = Table(title="評価結果（CER は低いほど良い、F1 は高いほど良い）")
-    for column in ("対象", "層", "CER", "数式F1", "見出しF1", "KaTeXエラー"):
+    for column in ("対象", "層", "CER", "数式F1", "数式CER", "見出しF1", "KaTeXエラー"):
         table.add_column(column)
     for row in report.pages:
         table.add_row(f"p.{row.page}", row.category, *_score_cells(row))
@@ -80,6 +80,7 @@ def _score_cells(item: PageReport | SummaryReport) -> list[str]:
     return [
         f"{scores.cer.cer:.2%}",
         f"{scores.math.f1:.3f} ({scores.math.matched}/{scores.math.truth_count})",
+        f"{scores.math_cer.cer:.2%}",
         f"{scores.headings.f1:.3f} ({scores.headings.matched}/{scores.headings.truth_count})",
         str(katex_errors),
     ]

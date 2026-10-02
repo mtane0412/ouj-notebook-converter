@@ -3,6 +3,8 @@
 指標:
   - 文字誤り率（CER）: 地の文（数式・Markdown 記法を除いた日本語部分）の編集距離 ÷ 正解の文字数
   - 数式の一致率: 正規化した数式の多重集合としての適合率・再現率・F1
+  - 数式の文字誤り率: 正規化した数式を出現順に連結した文字列の編集距離 ÷ 正解の文字数。
+    数式の分割・結合のしかたに左右されないため、一致率の補助指標とする
   - 見出し構造の一致率: (レベル, テキスト) の多重集合としての適合率・再現率・F1
 
 注意事項:
@@ -16,7 +18,11 @@ from collections import Counter
 from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
 
-from ouj_notebook_converter.evaluation.markdown_parts import normalize_latex, split_markdown
+from ouj_notebook_converter.evaluation.markdown_parts import (
+    Formula,
+    normalize_latex,
+    split_markdown,
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,7 @@ class PageScores:
 
     cer: CerScore
     math: MatchScore
+    math_cer: CerScore
     headings: MatchScore
 
 
@@ -118,12 +125,12 @@ def evaluate_page(truth_markdown: str, pred_markdown: str) -> PageScores:
     """1 ページ分の正解 Markdown と評価対象 Markdown を比較する。"""
     truth = split_markdown(truth_markdown)
     pred = split_markdown(pred_markdown)
+    truth_math = _normalized_formulas(truth.formulas)
+    pred_math = _normalized_formulas(pred.formulas)
     return PageScores(
-        cer=CerScore(edits=levenshtein(truth.prose, pred.prose), truth_length=len(truth.prose)),
-        math=match_multiset(
-            (normalize_latex(f.tex) for f in truth.formulas),
-            (normalize_latex(f.tex) for f in pred.formulas),
-        ),
+        cer=_cer(truth.prose, pred.prose),
+        math=match_multiset(truth_math, pred_math),
+        math_cer=_cer("".join(truth_math), "".join(pred_math)),
         headings=match_multiset(truth.headings, pred.headings),
     )
 
@@ -131,12 +138,26 @@ def evaluate_page(truth_markdown: str, pred_markdown: str) -> PageScores:
 def summarize(scores: Sequence[PageScores]) -> PageScores:
     """複数ページの指標の件数を合算する（マイクロ平均の元になる）。"""
     return PageScores(
-        cer=CerScore(
-            edits=sum(s.cer.edits for s in scores),
-            truth_length=sum(s.cer.truth_length for s in scores),
-        ),
+        cer=_sum_cer([s.cer for s in scores]),
         math=_sum_match([s.math for s in scores]),
+        math_cer=_sum_cer([s.math_cer for s in scores]),
         headings=_sum_match([s.headings for s in scores]),
+    )
+
+
+def _normalized_formulas(formulas: Sequence[Formula]) -> list[str]:
+    """数式を正規化する。日本語だけの数式は正規化後に空になるため除く。"""
+    return [tex for tex in (normalize_latex(f.tex) for f in formulas) if tex]
+
+
+def _cer(truth: str, pred: str) -> CerScore:
+    return CerScore(edits=levenshtein(truth, pred), truth_length=len(truth))
+
+
+def _sum_cer(scores: Sequence[CerScore]) -> CerScore:
+    return CerScore(
+        edits=sum(s.edits for s in scores),
+        truth_length=sum(s.truth_length for s in scores),
     )
 
 

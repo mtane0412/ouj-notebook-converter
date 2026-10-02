@@ -83,6 +83,8 @@ class TestEvaluateDataset:
 
         assert data["total"]["cer"] == pytest.approx(1 / 6)
         assert data["total"]["math_f1"] == 0.0
+        # 数式の文字誤り率の分母は正解の数式（p.70 の \\sqrt[4]{a}、11 文字）の文字数
+        assert data["total"]["math_cer_truth_length"] == len("\\sqrt[4]{a}")
         assert data["total"]["katex_errors"] == 1
         assert data["pages"][1]["katex_error_messages"] == ["Undefined control sequence: \\cline"]
 

@@ -89,6 +89,25 @@ class TestEvaluatePage:
 
         assert scores.math.matched == 1
 
+    def test_text_only_formula_is_not_counted_as_formula(self) -> None:
+        """日本語だけの数式（$\\text{のとき}$ など）は数式の件数に含めない。"""
+        scores = evaluate_page("$x$ のとき", "$x$ $\\text{のとき}$")
+
+        assert scores.math == MatchScore(matched=1, truth_count=1, pred_count=1)
+
+    def test_math_cer_is_robust_to_formula_splitting(self) -> None:
+        """数式の文字誤り率は、数式の分割のしかたが違っても内容が同じなら 0 になる。"""
+        scores = evaluate_page("$$a = b$$\n$$= c$$", "$$a = b = c$$")
+
+        assert scores.math.matched == 0
+        assert scores.math_cer == CerScore(edits=0, truth_length=len("a=b=c"))
+
+    def test_math_cer_counts_misread_root_index(self) -> None:
+        """根指数の誤読（4 乗根→3 乗根）は数式の文字誤り 1 文字として数える。"""
+        scores = evaluate_page("$(\\sqrt[4]{a})^4$", "$(\\sqrt[3]{a})^4$")
+
+        assert scores.math_cer.edits == 1
+
 
 class TestSummarize:
     """全ページの集計。"""
@@ -102,3 +121,4 @@ class TestSummarize:
 
         assert total.cer == CerScore(edits=1, truth_length=10)
         assert total.math == MatchScore(matched=0, truth_count=1, pred_count=1)
+        assert total.math_cer == CerScore(edits=1, truth_length=1)

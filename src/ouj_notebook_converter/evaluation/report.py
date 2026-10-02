@@ -137,6 +137,9 @@ def _metrics_dict(scores: PageScores, *, katex_errors: int) -> dict[str, Any]:
         "cer_edits": scores.cer.edits,
         "cer_truth_length": scores.cer.truth_length,
         **_match_dict("math", scores.math),
+        "math_cer": scores.math_cer.cer,
+        "math_cer_edits": scores.math_cer.edits,
+        "math_cer_truth_length": scores.math_cer.truth_length,
         **_match_dict("heading", scores.headings),
         "katex_errors": katex_errors,
     }

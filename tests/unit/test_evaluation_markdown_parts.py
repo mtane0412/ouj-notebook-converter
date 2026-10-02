@@ -63,6 +63,34 @@ class TestFormulas:
         assert split_markdown(markdown).formulas == (Formula(tex=markdown, display=True),)
 
 
+class TestTextInsideMath:
+    """数式内の日本語（\\text）と式番号（\\tag）の扱い。
+
+    OCR は「となり，」などの日本語や式番号を数式の中に入れることも外に出すこともある。
+    書式の違いを誤りとして数えないよう、どちらの書き方でも同じ地の文になることを確かめる。
+    """
+
+    def test_text_inside_math_counts_as_prose(self) -> None:
+        """\\text{...} の中身は数式の位置にある地の文として扱う。"""
+        inside = split_markdown("$$a = b \\text{となり，}$$")
+        outside = split_markdown("$$a = b$$ となり，")
+
+        assert inside.prose == outside.prose == "となり,"
+
+    def test_tag_counts_as_equation_number_in_prose(self) -> None:
+        """\\tag{X} は地の文の式番号「(X)」として扱う。"""
+        inside = split_markdown("$$x = 1 \\tag{4.4}$$")
+        outside = split_markdown("$$x = 1$$ (4.4)")
+
+        assert inside.prose == outside.prose == "(4.4)"
+
+    def test_keeps_original_tex_for_katex_check(self) -> None:
+        """KaTeX の描画検査のため、Formula の tex は元の数式本体のまま保持する。"""
+        parts = split_markdown("$$x = 1 \\tag{4.4}$$")
+
+        assert parts.formulas == (Formula(tex="x = 1 \\tag{4.4}", display=True),)
+
+
 class TestHeadings:
     """見出しの抽出。"""
 
@@ -100,6 +128,10 @@ class TestNormalizeLatex:
     def test_keeps_different_root_index(self) -> None:
         """根指数の違い（実際に起きた 4 乗根→3 乗根の誤読）は区別する。"""
         assert normalize_latex("\\sqrt[4]{a}") != normalize_latex("\\sqrt[3]{a}")
+
+    def test_removes_text_and_tag(self) -> None:
+        """地の文として扱う \\text{...} と \\tag{...} は数式の比較から除く。"""
+        assert normalize_latex("a = b \\text{となり，} \\tag{4.4}") == normalize_latex("a = b")
 
     def test_does_not_break_longer_command_names(self) -> None:
         """\\le の置換が \\left や \\leftarrow など別の命令を壊さない。"""
