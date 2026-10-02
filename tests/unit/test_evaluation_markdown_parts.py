@@ -107,6 +107,16 @@ class TestHeadings:
         """コードフェンス内の # 行は見出しとして扱わない。"""
         assert split_markdown("```\n# 図中の文字\n```\n").headings == ()
 
+    def test_shorter_or_different_fence_inside_code_does_not_close_it(self) -> None:
+        """```` で開いたフェンスは、中の短い ``` の行では閉じない（CommonMark の規則）。"""
+        markdown = "````\n```\n# 図中の文字\n````\n# 本文の見出し\n"
+
+        assert split_markdown(markdown).headings == (Heading(level=1, text="本文の見出し"),)
+
+    def test_math_inside_code_fence_is_not_a_formula(self) -> None:
+        """コードフェンス内の $...$ は数式として数えない。"""
+        assert split_markdown("```\n図中の $x$ の位置\n```\n").formulas == ()
+
 
 class TestNormalizeLatex:
     """数式比較用の LaTeX 正規化。"""

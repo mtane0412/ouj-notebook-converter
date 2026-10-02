@@ -118,7 +118,7 @@ def _is_code_fence_close(line: str, opening: str) -> bool:
     return len(body) >= len(opening) and body == opening[0] * len(body)
 
 
-def _split_code_fences(markdown: str) -> list[tuple[str, bool]]:
+def split_code_fences(markdown: str) -> list[tuple[str, bool]]:
     """Markdown をコードフェンス内外の断片に分割する。
 
     Returns:
@@ -158,5 +158,5 @@ def normalize_ocr_markdown(markdown: str) -> str:
     """
     return "".join(
         segment if in_fence else _normalize_chunk(segment)
-        for segment, in_fence in _split_code_fences(markdown)
+        for segment, in_fence in split_code_fences(markdown)
     )

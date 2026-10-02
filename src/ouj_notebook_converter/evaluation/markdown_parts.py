@@ -7,7 +7,7 @@
 注意事項:
   - 数式の検出には変換時の後処理（markdown_cleanup）と同じ正規表現を使う
   - NFKC 正規化により全角・半角の違い（「，」と「,」など）は誤りとして数えない
-  - コードフェンス内の行は見出しとして扱わないが、地の文には含める（図中の文字も本文の一部とみなす）
+  - コードフェンス内の行は見出し・数式として扱わないが、地の文には含める（図中の文字も本文の一部とみなす）
   - 数式内の \\text{...} の中身と \\tag{X}（「(X)」として）は地の文として扱う。OCR が日本語や
     式番号を数式の中に入れても外に出しても、同じ地の文・同じ数式として比較するため
 """
@@ -18,7 +18,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from ouj_notebook_converter.pipeline.stages.markdown_cleanup import MATH_SPAN
+from ouj_notebook_converter.pipeline.stages.markdown_cleanup import (
+    MATH_SPAN,
+    split_code_fences,
+)
 
 
 @dataclass(frozen=True)
@@ -57,7 +60,8 @@ class MarkdownParts:
 
 
 _HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$")
-_CODE_FENCE = re.compile(r"^ {0,3}(?:`{3,}|~{3,})")
+# 閉じフェンス行（info string を持たない）
+_CLOSING_CODE_FENCE = re.compile(r"^ {0,3}(?:`{3,}|~{3,})[ \t]*$")
 # 表の区切り行（| --- | :---: | など）
 _TABLE_SEPARATOR = re.compile(r"^\s*\|?(?:\s*:?-{3,}:?\s*\|?)+\s*$")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+\.)[ \t]+")
@@ -110,29 +114,33 @@ def split_markdown(markdown: str) -> MarkdownParts:
     Returns:
         分解結果。
     """
-    formulas = tuple(_to_formula(match.group(0)) for match in MATH_SPAN.finditer(markdown))
-    # 数式を「数式内の地の文」に置き換えてから行単位で記法を除く（数式は複数行にまたがりうるため先に除く）
-    without_math = MATH_SPAN.sub(lambda m: f" {_prose_in_math(m.group(0))} ", markdown)
-
+    formulas: list[Formula] = []
     prose_lines: list[str] = []
     headings: list[Heading] = []
-    in_fence = False
-    for line in without_math.splitlines():
-        if _CODE_FENCE.match(line):
-            in_fence = not in_fence
+    # コードフェンスの内外は変換時の後処理と同じ CommonMark 準拠の規則で分ける
+    for segment, in_fence in split_code_fences(markdown):
+        if in_fence:
+            # フェンス内は数式・見出しとして扱わず、フェンス行を除いた中身をそのまま地の文に含める
+            content = segment.splitlines()[1:]
+            if content and _CLOSING_CODE_FENCE.match(content[-1]):
+                content = content[:-1]
+            prose_lines.extend(content)
             continue
-        if not in_fence:
+        formulas.extend(_to_formula(m.group(0)) for m in MATH_SPAN.finditer(segment))
+        # 数式を「数式内の地の文」に置き換えてから行単位で記法を除く（数式は複数行にまたがりうるため先に除く）
+        without_math = MATH_SPAN.sub(lambda m: f" {_prose_in_math(m.group(0))} ", segment)
+        for line in without_math.splitlines():
             heading = _HEADING.match(line)
             if heading is not None:
                 headings.append(
                     Heading(level=len(heading.group(1)), text=_normalize_text(heading.group(2)))
                 )
                 line = heading.group(2)
-        prose_lines.append(_strip_markup(line))
+            prose_lines.append(_strip_markup(line))
 
     return MarkdownParts(
         prose=_normalize_text("".join(prose_lines)),
-        formulas=formulas,
+        formulas=tuple(formulas),
         headings=tuple(headings),
     )
 
