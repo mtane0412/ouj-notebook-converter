@@ -189,6 +189,25 @@ uv run python -m ouj_notebook_converter.evaluation \
 - `--pred`: `ounc --no-combine` の出力ディレクトリ、またはページキャッシュ（`page_NNNN/raw.md`）のディレクトリ
 - 指標: 地の文の文字誤り率（CER）、数式の一致率（F1）と文字誤り率、見出し（レベル・テキスト）の一致率（F1）、KaTeX で描画できない数式の件数。ページ別・層別・全体で表示する
 
+### 等式の検算による誤読候補の検出（プロトタイプ）
+
+OCR 結果の数式に含まれる等式・不等式の連鎖（`A = B > C` など）を sympy で検算し、
+恒等的に成り立たない式（例: 4 乗根を 3 乗根と誤読した `(\sqrt[3]{a})^3 = (\sqrt[3]{a})^4`）を誤読候補として表示する。
+
+```bash
+uv sync --extra verify   # sympy と lark（LaTeX パーサー）をインストール
+
+uv run python -m ouj_notebook_converter.detectors \
+  --pred /path/to/output_or_cache \
+  --truth /path/to/eval \
+  --json result.json
+```
+
+- `--pred`: 精度評価と同じ。ディレクトリ内の全ページを検算する
+- `--truth`（任意）: 評価セットのページについて、誤読候補を正解と照らし合わせて適合率・再現率を表示する
+- 方程式・定義（片辺が文字 1 つや数値の等式、両辺の文字の組が異なる等式）、値によって成否が変わる不等式、
+  「〜ではない」と否定された式は誤読候補にしない。日本語を含む項・解釈できない項・筆算や場合分けの環境はスキップし、件数を表示する
+
 ## アーキテクチャ概要
 
 ```

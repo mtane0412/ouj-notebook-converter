@@ -11,6 +11,7 @@ import pytest
 
 from ouj_notebook_converter.evaluation.dataset import (
     EvalPage,
+    list_prediction_pages,
     load_manifest,
     read_prediction,
     read_truth,
@@ -107,3 +108,22 @@ class TestReadPrediction:
         """どちらの形式も無ければ FileNotFoundError を送出する。"""
         with pytest.raises(FileNotFoundError, match="page_0070"):
             read_prediction(tmp_path, 70)
+
+
+class TestListPredictionPages:
+    """list_prediction_pages: 評価対象ディレクトリにあるページ番号の一覧。"""
+
+    def test_lists_pages_of_both_layouts_in_order(self, tmp_path: Path) -> None:
+        (tmp_path / "page_0012.md").write_text("出力", encoding="utf-8")
+        (tmp_path / "page_0003").mkdir()
+        (tmp_path / "page_0003" / "raw.md").write_text("キャッシュ", encoding="utf-8")
+        (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+        assert list_prediction_pages(tmp_path) == [3, 12]
+
+    def test_ignores_cache_dir_without_raw_md(self, tmp_path: Path) -> None:
+        (tmp_path / "page_0005").mkdir()
+        assert list_prediction_pages(tmp_path) == []
+
+    def test_missing_dir_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            list_prediction_pages(tmp_path / "なし")
