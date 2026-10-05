@@ -68,3 +68,36 @@ def test_missing_pred_dir_fails(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli.app, ["--pred", str(tmp_path / "なし")])
     assert result.exit_code == 1
     assert "見つかりません" in result.output
+
+
+def test_unwritable_json_path_fails(dirs: tuple[Path, Path], tmp_path: Path) -> None:
+    """--json の書き込み先のディレクトリが無ければ、エラーを表示して終了コード 1 で終わる。"""
+    pred_dir, _ = dirs
+    json_path = tmp_path / "存在しないフォルダ" / "result.json"
+
+    result = CliRunner().invoke(cli.app, ["--pred", str(pred_dir), "--json", str(json_path)])
+
+    assert result.exit_code == 1
+    assert "エラー" in result.output
+
+
+def test_reads_each_page_only_once(
+    dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """検算と適合率の計算で同じ Markdown を使うため、各ページの読み込みは 1 回だけにする。
+
+    2 回読むと、その間にキャッシュが更新された場合に数式の番号がずれるため。
+    """
+    pred_dir, truth_dir = dirs
+    read_pages: list[int] = []
+    original = cli.read_prediction
+
+    def counting_read(pred: Path, page: int) -> str:
+        read_pages.append(page)
+        return original(pred, page)
+
+    monkeypatch.setattr(cli, "read_prediction", counting_read)
+    result = CliRunner().invoke(cli.app, ["--pred", str(pred_dir), "--truth", str(truth_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert sorted(read_pages) == [70, 71]

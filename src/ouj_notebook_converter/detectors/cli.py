@@ -50,13 +50,12 @@ def equation_check(
 ) -> None:
     """数式の等式・不等式を検算し、成り立たない式を誤読候補として表示する。"""
     try:
-        checks = {
-            page: check_markdown(read_prediction(pred, page))
-            for page in list_prediction_pages(pred)
-        }
+        # 検算と適合率の計算で同じ Markdown を使う（読み直すと数式の番号がずれうるため）
+        predictions = {page: read_prediction(pred, page) for page in list_prediction_pages(pred)}
+        checks = {page: check_markdown(markdown) for page, markdown in predictions.items()}
         result = _summarize(checks)
         if truth is not None:
-            result["scores"] = _score(truth, pred, checks)
+            result["scores"] = _score(truth, pred, predictions, checks)
     except (FileNotFoundError, ValueError) as e:
         typer.echo(f"エラー: {e}", err=True)
         raise typer.Exit(code=1) from e
@@ -67,7 +66,11 @@ def equation_check(
     if "scores" in result:
         console.print(_score_table(result["scores"]))
     if json_path is not None:
-        json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            typer.echo(f"エラー: {e}", err=True)
+            raise typer.Exit(code=1) from e
         console.print(f"検出結果を書き出しました: {json_path}")
 
 
@@ -96,8 +99,13 @@ def _summarize(checks: dict[int, MarkdownCheck]) -> dict[str, Any]:
     }
 
 
-def _score(truth: Path, pred: Path, checks: dict[int, MarkdownCheck]) -> dict[str, Any]:
-    """評価セットのページについて、誤読候補を正解と照らし合わせる。"""
+def _score(
+    truth: Path, pred: Path, predictions: dict[int, str], checks: dict[int, MarkdownCheck]
+) -> dict[str, Any]:
+    """評価セットのページについて、誤読候補を正解と照らし合わせる。
+
+    predictions は check_markdown に渡したものと同じ Markdown（formula_index の対応を保つため）。
+    """
     pages: list[dict[str, Any]] = []
     scores: list[DetectionScore] = []
     for entry in load_manifest(truth):
@@ -108,9 +116,7 @@ def _score(truth: Path, pred: Path, checks: dict[int, MarkdownCheck]) -> dict[st
         flagged = {
             r.formula_index for r in checks[entry.page].links if r.status == LinkStatus.VIOLATED
         }
-        score = score_page(
-            read_truth(truth, entry.page), read_prediction(pred, entry.page), flagged
-        )
+        score = score_page(read_truth(truth, entry.page), predictions[entry.page], flagged)
         scores.append(score)
         pages.append({"page": entry.page, "category": entry.category, **score.to_dict()})
     return {"pages": pages, "total": sum_scores(scores).to_dict()}
