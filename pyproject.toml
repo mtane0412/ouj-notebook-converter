@@ -29,6 +29,11 @@ ocr = ["yomitoku>=0.10"]
 gemini = ["google-genai>=1.0", "Pillow>=10.0"]
 epub = ["pypandoc>=1.13"]
 pdf = ["reportlab>=4"]
+# 数式の等式・不等式の検算（detectors.equation_check）。sympy の LaTeX パーサーに lark を使う
+verify = [
+    "lark>=1.2",
+    "sympy>=1.13",
+]
 
 [project.scripts]
 ounc = "ouj_notebook_converter.cli:app"
@@ -82,6 +87,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["reportlab", "reportlab.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["sympy", "sympy.*", "lark", "lark.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

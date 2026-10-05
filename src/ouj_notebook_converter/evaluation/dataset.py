@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -23,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ouj_notebook_converter.pipeline.stages.markdown_cleanup import normalize_ocr_markdown
 
 MANIFEST_FILENAME = "manifest.json"
+_PAGE_STEM = re.compile(r"page_(\d{4})")
 
 
 class EvalPage(BaseModel):
@@ -102,6 +104,30 @@ def read_prediction(pred_dir: Path, page: int) -> str:
     if has_cache:
         return normalize_ocr_markdown(cache_path.read_text(encoding="utf-8"))
     raise FileNotFoundError(f"評価対象のページが見つかりません: {output_path} または {cache_path}")
+
+
+def list_prediction_pages(pred_dir: Path) -> list[int]:
+    """評価対象ディレクトリにあるページ番号（1 始まり）を昇順で返す。
+
+    page_NNNN.md（--no-combine 出力）と page_NNNN/raw.md（ページキャッシュ）の両方を数える。
+    raw.md の無いキャッシュディレクトリ（OCR 未完了のページ）は含めない。
+
+    Raises:
+        FileNotFoundError: ディレクトリが存在しない場合。
+    """
+    if not pred_dir.is_dir():
+        raise FileNotFoundError(f"評価対象のディレクトリが見つかりません: {pred_dir}")
+    pages: set[int] = set()
+    for path in pred_dir.iterdir():
+        if path.is_file() and path.suffix == ".md":
+            match = _PAGE_STEM.fullmatch(path.stem)
+        elif path.is_dir() and (path / "raw.md").is_file():
+            match = _PAGE_STEM.fullmatch(path.name)
+        else:
+            continue
+        if match is not None:
+            pages.add(int(match.group(1)))
+    return sorted(pages)
 
 
 def _page_stem(page: int) -> str:
