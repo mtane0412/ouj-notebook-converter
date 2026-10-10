@@ -17,6 +17,7 @@ import typer
 
 from ouj_notebook_converter.config import Settings
 from ouj_notebook_converter.corrections import CorrectionError, load_corrections
+from ouj_notebook_converter.evaluation.katex import KatexCheckError
 from ouj_notebook_converter.exporters.markdown import (
     export_markdown,
     export_markdown_by_chapters,
@@ -32,6 +33,7 @@ from ouj_notebook_converter.plugins.math.server_manager import (
     Pix2TextServerManager,
     ServerStartupError,
 )
+from ouj_notebook_converter.quality_report import create_quality_report, ensure_katex_available
 from ouj_notebook_converter.utils.pages import parse_page_range
 
 app = typer.Typer(
@@ -169,6 +171,13 @@ def convert(
             help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.8-flash)",
         ),
     ] = "gemini-3.8-flash",
+    quality_report: Annotated[
+        bool,
+        typer.Option(
+            "--quality-report",
+            help="KaTeX で描画できない数式の品質レポートを出力先に書き出す（Node.js と katex が必要）",
+        ),
+    ] = False,
     corrections: Annotated[
         Path | None,
         typer.Option(
@@ -205,6 +214,14 @@ def convert(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    # OCR（API 課金・長時間）を始める前に、品質レポートに必要な Node.js / katex を確認する
+    if quality_report:
+        try:
+            ensure_katex_available()
+        except KatexCheckError as e:
+            typer.echo(f"エラー: {e}", err=True)
+            raise typer.Exit(code=1) from e
 
     # 修正ファイルは OCR（API 呼び出し）の前に検証し、不正なら即停止する
     try:
@@ -302,6 +319,13 @@ def convert(
     except CorrectionError as e:
         typer.echo(f"エラー: {e}", err=True)
         raise typer.Exit(code=1) from e
+
+    if quality_report:
+        report = create_quality_report(page_markdowns, outdir)
+        typer.echo(
+            f"品質レポート出力: {outdir} (KaTeX で描画できない数式 {len(report.errors)} 件"
+            f" / 全 {report.total_formulas} 件)"
+        )
 
     assets_dir = outdir / f"{book_name}_assets"
 

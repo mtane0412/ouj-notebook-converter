@@ -237,6 +237,25 @@ uv run python -m ouj_notebook_converter.evaluation \
 - `--pred`: `ounc --no-combine` の出力ディレクトリ、またはページキャッシュ（`page_NNNN/raw.md`）のディレクトリ
 - 指標: 地の文の文字誤り率（CER）、数式の一致率（F1）と文字誤り率、見出し（レベル・テキスト）の一致率（F1）、KaTeX で描画できない数式の件数。ページ別・層別・全体で表示する
 
+### 変換時の品質レポート（KaTeX 描画可否）
+
+`--quality-report` を付けると、変換結果の全数式を KaTeX で検査し、描画できない数式を
+「ページ / 数式 / エラー内容」で一覧にして出力先ディレクトリ（`--outdir`）に書き出す。
+
+```bash
+# 初回のみ: KaTeX 検査用の Node.js 依存をインストール
+(cd scripts/katex_check && npm install)
+
+ounc book.pdf -o out --ocr-backend gemini --quality-report
+# → out/quality_report.json（機械可読）と out/quality_report.md（人が読む表）
+```
+
+- 既定では出力しない（オプトイン）。Node.js と `npm install` が前提であり、既定で有効にすると Node.js の無い環境の変換が失敗するため
+- Node.js や katex が使えない場合は、OCR を始める前にエラー終了する（黙ってスキップしない）
+- ページ番号は PDF の 1 始まり、数式番号はそのページ内の出現順（1 始まり）
+- 後処理で `eqnarray*` → `aligned` への置き換えと `array` 列指定の `@{...}` の除去を自動で行う。
+  `\cline` / `\multicolumn` / `\enclose` は KaTeX に同等の表記が無く、置き換えると筆算の意味が変わるため変換せず、レポートで検出する
+
 ### 等式の検算による誤読候補の検出（プロトタイプ）
 
 OCR 結果の数式に含まれる等式・不等式の連鎖（`A = B > C` など）を sympy で検算し、
