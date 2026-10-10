@@ -339,3 +339,55 @@ class TestRunPagesWithMath:
 
         assert (cache_dir / "page_0001").is_dir()
         assert (cache_dir / "page_0002").is_dir()
+
+
+class TestRunPagesWithCorrections:
+    """run_pages の人手修正（corrections）適用テスト。"""
+
+    def _config(self, tmp_path: Path, corrections: dict, pages: list[int]) -> ConvertConfig:
+        cache_dir = tmp_path / ".cache"
+        for page_no in (1, 2):
+            page_dir = cache_dir / f"page_{page_no:04d}"
+            page_dir.mkdir(parents=True)
+            (page_dir / "analysis.json").write_text("{}", encoding="utf-8")
+            (page_dir / "raw.md").write_text(f"{page_no} ページ目の誤読文字\n", encoding="utf-8")
+        return ConvertConfig(
+            pdf_path=Path("dummy.pdf"),
+            cache_dir=cache_dir,
+            page_indices=pages,
+            dpi=200,
+            analyzer=MagicMock(),
+            corrections=corrections,
+        )
+
+    def test_該当ページにだけ修正が適用される(self, tmp_path: Path) -> None:
+        from ouj_notebook_converter.corrections import Correction
+
+        corrections = {2: (Correction(page=2, before="誤読", after="正読"),)}
+        config = self._config(tmp_path, corrections, [0, 1])
+
+        results = run_pages(config, loader=_make_fake_loader(2))
+
+        assert results[0].markdown == "1 ページ目の誤読文字\n"
+        assert results[1].markdown == "2 ページ目の正読文字\n"
+
+    def test_処理対象外ページの修正は無視される(self, tmp_path: Path) -> None:
+        from ouj_notebook_converter.corrections import Correction
+
+        corrections = {2: (Correction(page=2, before="存在しない", after="X"),)}
+        config = self._config(tmp_path, corrections, [0])
+
+        results = run_pages(config, loader=_make_fake_loader(2))
+
+        assert len(results) == 1
+
+    def test_総ページ数を超えるページの修正は例外(self, tmp_path: Path) -> None:
+        import pytest
+
+        from ouj_notebook_converter.corrections import Correction, CorrectionError
+
+        corrections = {9: (Correction(page=9, before="誤読", after="正読"),)}
+        config = self._config(tmp_path, corrections, [0])
+
+        with pytest.raises(CorrectionError, match="9 ページ"):
+            run_pages(config, loader=_make_fake_loader(2))

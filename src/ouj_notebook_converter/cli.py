@@ -16,6 +16,7 @@ from typing import Annotated, Any
 import typer
 
 from ouj_notebook_converter.config import Settings
+from ouj_notebook_converter.corrections import CorrectionError, load_corrections
 from ouj_notebook_converter.exporters.markdown import (
     export_markdown,
     export_markdown_by_chapters,
@@ -168,6 +169,13 @@ def convert(
             help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.8-flash)",
         ),
     ] = "gemini-3.8-flash",
+    corrections: Annotated[
+        Path | None,
+        typer.Option(
+            "--corrections",
+            help="人手修正ファイル（JSON）。OCR 結果に変換時に適用する（キャッシュは変更しない）",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -197,6 +205,13 @@ def convert(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    # 修正ファイルは OCR（API 呼び出し）の前に検証し、不正なら即停止する
+    try:
+        page_corrections = load_corrections(corrections) if corrections else {}
+    except CorrectionError as e:
+        typer.echo(f"エラー: {e}", err=True)
+        raise typer.Exit(code=1) from e
 
     effective_cache_dir = cache_dir or (outdir / ".cache")
 
@@ -276,12 +291,17 @@ def convert(
         math_engine=math_engine,
         math_backend=math_backend.value,
         no_cache=no_cache,
+        corrections=page_corrections,
     )
 
     if verbose:
         typer.echo(f"OCR 開始: {input_pdf.name} ({len(page_indices)} ページ)")
 
-    page_markdowns = run_pages(config, loader=loader)
+    try:
+        page_markdowns = run_pages(config, loader=loader)
+    except CorrectionError as e:
+        typer.echo(f"エラー: {e}", err=True)
+        raise typer.Exit(code=1) from e
 
     assets_dir = outdir / f"{book_name}_assets"
 
