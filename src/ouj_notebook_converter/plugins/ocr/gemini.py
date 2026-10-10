@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,41 @@ _GEMINI_OCR_PROMPT = (
     "5. ページ番号・ヘッダー・フッターは除外する\n"
     "6. テキスト以外の前置き・説明は一切出力しない"
 )
+
+
+@dataclass(frozen=True)
+class GeminiUsage:
+    """Gemini レスポンスの usage_metadata から取り出したトークン使用量。
+
+    Attributes:
+        prompt_tokens: 入力（画像とプロンプト）のトークン数。
+        output_tokens: 出力（回答本文）のトークン数。
+        thinking_tokens: 思考に使われたトークン数。
+        total_tokens: 合計トークン数。
+    取得できなかった項目は None。
+    """
+
+    prompt_tokens: int | None
+    output_tokens: int | None
+    thinking_tokens: int | None
+    total_tokens: int | None
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _extract_usage(response: Any) -> GeminiUsage | None:
+    """レスポンスから GeminiUsage を作る。usage_metadata が無ければ None を返す。"""
+    metadata = getattr(response, "usage_metadata", None)
+    if metadata is None:
+        return None
+    return GeminiUsage(
+        prompt_tokens=_int_or_none(getattr(metadata, "prompt_token_count", None)),
+        output_tokens=_int_or_none(getattr(metadata, "candidates_token_count", None)),
+        thinking_tokens=_int_or_none(getattr(metadata, "thoughts_token_count", None)),
+        total_tokens=_int_or_none(getattr(metadata, "total_token_count", None)),
+    )
 
 
 class GeminiAnalyzerResult:
@@ -84,11 +120,19 @@ class GeminiAnalyzer:
     AnalyzerProtocol を実装し、既存パイプラインの analyzer として差し込める。
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-3.8-flash") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-3.8-flash",
+        prompt: str = _GEMINI_OCR_PROMPT,
+    ) -> None:
         from google import genai
 
         self._client = genai.Client(api_key=api_key)
         self._model = model
+        self._prompt = prompt
+        # 直近の呼び出しのトークン使用量（実験用ハーネスが参照する。未呼び出し・取得不可は None）
+        self.last_usage: GeminiUsage | None = None
 
     def __call__(
         self, image: np.ndarray
@@ -112,12 +156,13 @@ class GeminiAnalyzer:
                 model=self._model,
                 contents=[  # type: ignore[arg-type]
                     types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
-                    _GEMINI_OCR_PROMPT,
+                    self._prompt,
                 ],
             )
         except Exception as e:
             raise RuntimeError(f"Gemini API 呼び出しに失敗しました: {e}") from e
 
+        self.last_usage = _extract_usage(response)
         return GeminiAnalyzerResult(response.text or ""), None, None
 
 
@@ -125,12 +170,14 @@ def create_gemini_analyzer(
     *,
     api_key: str,
     model: str = "gemini-3.8-flash",
+    prompt: str = _GEMINI_OCR_PROMPT,
 ) -> GeminiAnalyzer:
     """GeminiAnalyzer を生成するファクトリ関数。
 
     Args:
         api_key: Gemini API キー。
         model: 使用するモデル名（デフォルト: gemini-3.8-flash）。
+        prompt: OCR プロンプト（デフォルト: 日本語教科書ページ向けの既定プロンプト）。
 
     Returns:
         GeminiAnalyzer インスタンス。
@@ -147,4 +194,4 @@ def create_gemini_analyzer(
             "  uv sync --extra gemini"
         ) from e
 
-    return GeminiAnalyzer(api_key=api_key, model=model)
+    return GeminiAnalyzer(api_key=api_key, model=model, prompt=prompt)

@@ -208,6 +208,29 @@ uv run python -m ouj_notebook_converter.detectors \
 - 方程式・定義（片辺が文字 1 つや数値の等式、両辺の文字の組が異なる等式）、値によって成否が変わる不等式、
   「〜ではない」と否定された式は誤読候補にしない。日本語を含む項・解釈できない項・筆算や場合分けの環境はスキップし、件数を表示する
 
+### 評価セットのページだけを条件を変えて再 OCR する（実験用）
+
+解像度・Gemini モデル・プロンプトを変えたときの精度を比べるための実験用ハーネス。評価セット（`manifest.json`）のページだけを再 OCR し、精度評価にそのまま渡せる形式で出力する。
+
+```bash
+export GEMINI_API_KEY=...   # または --api-key
+
+uv run python -m ouj_notebook_converter.evaluation.reocr \
+  --truth /path/to/eval --pdf /path/to/原本.pdf \
+  --dpi 300 --model gemini-3.8-flash \
+  --out /path/to/experiments/issue-25/flash-300dpi \
+  [--prompt-file prompt.txt] [--run-id run1]
+
+# 出力をそのまま評価できる
+uv run python -m ouj_notebook_converter.evaluation \
+  --truth /path/to/eval --pred /path/to/experiments/issue-25/flash-300dpi
+```
+
+- 出力: `page_NNNN/raw.md`（OCR 結果）、`page_NNNN/usage.json`（処理時間・試行回数・トークン使用量）、`run.json`（条件と合計）
+- `--run-id`: 繰り返し実行用。指定すると `<out>/<run-id>/` に出力する
+- 中断しても同じコマンドで再開できる（完了済みページは API を呼ばない）。レート制限（HTTP 429/500/503）は待って再試行する
+- ページキャッシュ（`ounc`）のディレクトリ名は、既定以外のモデル・DPI を指定すると `…gemini-<モデル名>-<DPI>dpi` のように分かれる（既定値は従来どおり `…gemini`）
+
 ## アーキテクチャ概要
 
 ```

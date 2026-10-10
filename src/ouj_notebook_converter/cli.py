@@ -40,6 +40,8 @@ app = typer.Typer(
 )
 
 _VALID_DEVICES = {"mps", "cpu", "cuda"}
+_DEFAULT_DPI = 200
+_DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 _DEFAULT_PIX2TEXT_VENV = Path.home() / ".venvs" / "pix2text"
 
 
@@ -95,7 +97,7 @@ def convert(
     device: Annotated[
         str, typer.Option("-d", "--device", help="推論デバイス: mps / cpu / cuda")
     ] = "mps",
-    dpi: Annotated[int, typer.Option(help="PDF レンダリング DPI")] = 200,
+    dpi: Annotated[int, typer.Option(help="PDF レンダリング DPI")] = _DEFAULT_DPI,
     pages: Annotated[
         str | None, typer.Option("--pages", help="処理するページ範囲 例: 1,3-5,10")
     ] = None,
@@ -167,7 +169,7 @@ def convert(
             "--gemini-model",
             help="Gemini モデル名 (--ocr-backend gemini 時、デフォルト: gemini-3.8-flash)",
         ),
-    ] = "gemini-3.8-flash",
+    ] = _DEFAULT_GEMINI_MODEL,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -260,9 +262,10 @@ def convert(
     page_indices = [p - 1 for p in page_indices_1based]  # 0-origin に変換
 
     book_name = input_pdf.stem
-    # OCR バックエンドごとに結果 JSON の内容が異なるため、キャッシュをバックエンド単位で分離する
-    book_cache_dir = (
-        effective_cache_dir / f"{book_name}.{_short_hash(input_pdf)}.{ocr_backend.value}"
+    # OCR 結果はバックエンド・Gemini モデル・DPI で変わるため、キャッシュをこれらの単位で分離する
+    book_cache_dir = effective_cache_dir / (
+        f"{book_name}.{_short_hash(input_pdf)}"
+        f".{_ocr_cache_label(ocr_backend, dpi=dpi, gemini_model=gemini_model)}"
     )
 
     config = ConvertConfig(
@@ -339,6 +342,21 @@ def _resolve_pix2text_server_script() -> Path:
     3 階層上のリポジトリルートから scripts/ を解決する。
     """
     return Path(__file__).parent.parent.parent / "scripts" / "pix2text_server.py"
+
+
+def _ocr_cache_label(ocr_backend: OcrBackend, *, dpi: int, gemini_model: str) -> str:
+    """ページキャッシュのディレクトリ名末尾（バックエンド・モデル・DPI の識別子）を返す。
+
+    既存キャッシュとの互換性のため、既定値（DPI 200、モデル gemini-3.8-flash）の要素は
+    省略する。すなわち既定の条件では従来どおり `gemini` / `yomitoku` となる。
+    Gemini モデル名は Gemini バックエンドのときだけ含める。
+    """
+    parts = [ocr_backend.value]
+    if ocr_backend == OcrBackend.gemini and gemini_model != _DEFAULT_GEMINI_MODEL:
+        parts.append(gemini_model)
+    if dpi != _DEFAULT_DPI:
+        parts.append(f"{dpi}dpi")
+    return "-".join(parts)
 
 
 def _short_hash(path: Path) -> str:
