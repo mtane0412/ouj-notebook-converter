@@ -645,3 +645,75 @@ class TestCacheDirPerModelAndDpi:
             mocker, tmp_path, "yomitoku", ["--gemini-model", "gemini-3.1-pro-preview"]
         ).name
         assert name.endswith(".yomitoku")
+
+
+class TestCorrectionsOption:
+    """--corrections オプション（人手修正ファイルの適用）のテスト（issue #28）。"""
+
+    def _invoke(self, mocker: MagicMock, tmp_path: Path, corrections_path: Path) -> object:
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        mock_loader = mocker.MagicMock()
+        mock_loader.total_pages = 1
+        mocker.patch("ouj_notebook_converter.cli.load_pdf_pages", return_value=mock_loader)
+        mocker.patch("ouj_notebook_converter.cli.create_analyzer")
+        self.mock_run_pages = mocker.patch(
+            "ouj_notebook_converter.cli.run_pages", return_value=[]
+        )
+        mocker.patch("ouj_notebook_converter.cli.export_markdown")
+        return runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--corrections", str(corrections_path),
+            ],
+        )
+
+    def test_修正ファイルがConvertConfigに渡される(self, mocker: MagicMock, tmp_path: Path) -> None:
+        path = tmp_path / "corrections.json"
+        path.write_text(
+            '{"version": 1, "corrections": [{"page": 1, "before": "服部", "after": "隈部"}]}',
+            encoding="utf-8",
+        )
+
+        result = self._invoke(mocker, tmp_path, path)
+
+        assert result.exit_code == 0, result.output  # type: ignore[attr-defined]
+        config = self.mock_run_pages.call_args.args[0]
+        assert config.corrections[1][0].after == "隈部"
+
+    def test_修正ファイルが不正ならOCR前にエラーで停止する(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        result = self._invoke(mocker, tmp_path, tmp_path / "存在しない.json")
+
+        assert result.exit_code == 1  # type: ignore[attr-defined]
+        assert "見つかりません" in result.output  # type: ignore[attr-defined]
+        self.mock_run_pages.assert_not_called()
+
+    def test_修正の適用失敗はエラーメッセージを出して終了コード1(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        from ouj_notebook_converter.corrections import CorrectionError
+
+        path = tmp_path / "corrections.json"
+        path.write_text('{"version": 1, "corrections": []}', encoding="utf-8")
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        mock_loader = mocker.MagicMock()
+        mock_loader.total_pages = 1
+        mocker.patch("ouj_notebook_converter.cli.load_pdf_pages", return_value=mock_loader)
+        mocker.patch("ouj_notebook_converter.cli.create_analyzer")
+        mocker.patch(
+            "ouj_notebook_converter.cli.run_pages",
+            side_effect=CorrectionError("3 ページの修正で置換前の文字列が見つかりません"),
+        )
+
+        result = runner.invoke(
+            app,
+            [str(pdf_path), "--outdir", str(tmp_path / "out"), "--corrections", str(path)],
+        )
+
+        assert result.exit_code == 1
+        assert "3 ページの修正" in result.output
