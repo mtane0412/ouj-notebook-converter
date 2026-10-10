@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>校正台</title>
+<!--
+  仕様: 原本画像と Markdown（KaTeX 描画）を並べて人手確認するための校正台のテンプレート。
+  review_board.py が KaTeX の CSS・JS・データの各プレースホルダ（style・script 内に 1 か所ずつ）を置換して index.html にする。
+  確認結果の保存先:
+    - Artifact として開いたとき: db の reviews コレクション（ドキュメント ID は p<4 桁ページ番号>）
+    - ローカルで開いたとき（db が無い）: ブラウザの localStorage。JSON をダウンロードして持ち出せる
+-->
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --ink: #1f2328; --muted: #6b7280; --line: #d9d9d2;
+  --accent: #2456a6; --ok: #1f7a3d; --ok-bg: #e3f3e8; --fix: #b3261e; --fix-bg: #fbe7e5;
+  --add: #dff3e3; --del: #fbe3e0; --code-bg: #f0f0eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181a; --panel: #212326; --ink: #e6e6e3; --muted: #9aa0a6; --line: #3a3d41;
+    --accent: #8ab4f8; --ok: #7fd49a; --ok-bg: #1d3a28; --fix: #ff8a80; --fix-bg: #4a2522;
+    --add: #1f3b27; --del: #4a2522; --code-bg: #2a2c2f;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181a; --panel: #212326; --ink: #e6e6e3; --muted: #9aa0a6; --line: #3a3d41;
+  --accent: #8ab4f8; --ok: #7fd49a; --ok-bg: #1d3a28; --fix: #ff8a80; --fix-bg: #4a2522;
+  --add: #1f3b27; --del: #4a2522; --code-bg: #2a2c2f;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.6 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0; }
+header .sp { flex: 1; }
+.badge { font-size: 12px; color: var(--muted); }
+button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, textarea:focus-visible, .page-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr) minmax(0, 1fr); }
+nav#pages { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+.page-item { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.page-item[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.page-item .cat { font-size: 12px; color: var(--muted); grid-column: 1; }
+.st { font-size: 12px; padding: 0 6px; border-radius: 10px; align-self: start; border: 1px solid var(--line); color: var(--muted); }
+.st.ok { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+.st.fix { color: var(--fix); background: var(--fix-bg); border-color: transparent; }
+.kerr { font-size: 12px; color: var(--fix); grid-column: 2; text-align: right; }
+section.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+#imgwrap { flex: 1; overflow: auto; padding: 8px; }
+#imgwrap img { display: block; max-width: none; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+#content { flex: 1; overflow: auto; padding: 12px 20px; background: var(--panel); }
+#content h1, #content h2, #content h3, #content h4 { line-height: 1.35; margin: 1em 0 .4em; }
+#content h1 { font-size: 1.5em; } #content h2 { font-size: 1.3em; } #content h3 { font-size: 1.12em; }
+#content p { margin: .5em 0; }
+#content table { border-collapse: collapse; margin: .6em 0; }
+#content td, #content th { border: 1px solid var(--line); padding: 2px 8px; }
+#content pre, pre.raw { background: var(--code-bg); padding: 8px; overflow: auto; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font: 13px/1.5 ui-monospace, Menlo, monospace; }
+#content hr { border: 0; border-top: 1px solid var(--line); }
+.kerror { color: var(--fix); background: var(--fix-bg); padding: 0 4px; border-radius: 4px; font: 12px ui-monospace, Menlo, monospace; }
+.diff-line { white-space: pre-wrap; word-break: break-all; font: 13px/1.5 ui-monospace, Menlo, monospace; padding: 0 6px; }
+.diff-line.add { background: var(--add); } .diff-line.del { background: var(--del); }
+.diff-line .c-add { background: color-mix(in srgb, var(--ok) 35%, transparent); }
+.diff-line .c-del { background: color-mix(in srgb, var(--fix) 35%, transparent); text-decoration: line-through; }
+.empty { color: var(--muted); }
+footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+footer textarea { flex: 1; min-width: 200px; min-height: 52px; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+button.ok.on { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+button.fix.on { background: var(--fix-bg); color: var(--fix); border-color: var(--fix); }
+#msg { font-size: 12px; color: var(--muted); align-self: center; }
+@media (max-width: 900px) {
+  body { height: auto; display: block; }
+  main { display: block; }
+  nav#pages { max-height: 160px; border-right: 0; border-bottom: 1px solid var(--line); }
+  section.pane { border-right: 0; border-bottom: 1px solid var(--line); }
+  #imgwrap { max-height: 70vh; } #content { max-height: 70vh; }
+}
+/*__KATEX_CSS__*/
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">校正台</h1>
+  <span class="badge" id="progress"></span>
+  <span class="badge" id="storage"></span>
+  <span class="sp"></span>
+  <button id="export" type="button">確認結果を JSON でダウンロード</button>
+</header>
+<main>
+  <nav id="pages" aria-label="ページ一覧"></nav>
+  <section class="pane" aria-label="原本画像">
+    <div class="toolbar">
+      <button type="button" id="zoom-out" aria-label="縮小">−</button>
+      <button type="button" id="zoom-in" aria-label="拡大">＋</button>
+      <button type="button" id="zoom-fit">幅に合わせる</button>
+      <span class="badge" id="zoom-label"></span>
+    </div>
+    <div id="imgwrap"><img id="pageimg" alt="原本ページ画像"></div>
+  </section>
+  <section class="pane" aria-label="Markdown">
+    <div class="toolbar" role="tablist" id="tabs"></div>
+    <div id="content" role="tabpanel"></div>
+  </section>
+</main>
+<footer>
+  <button type="button" class="ok" id="btn-ok">確認OK</button>
+  <button type="button" class="fix" id="btn-fix">要修正</button>
+  <button type="button" id="btn-clear">未確認に戻す</button>
+  <textarea id="memo" placeholder="メモ（要修正の内容など）" aria-label="メモ"></textarea>
+  <span id="msg" role="status"></span>
+</footer>
+
+<script>/*__KATEX_JS__*/</script>
+<script type="application/json" id="board-data">__DATA_JSON__</script>
+<script>
+"use strict";
+(function () {
+  const DATA = JSON.parse(document.getElementById("board-data").textContent);
+  const MATH_SPAN = new RegExp(DATA.mathSpanPattern, "g");
+  const $ = (id) => document.getElementById(id);
+  const pages = DATA.pages;
+  document.title = DATA.title;
+  $("title").textContent = DATA.title;
+
+  // ---------- 数式つき Markdown の描画 ----------
+  const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  // 数式スパンから区切り記号を除いた本体と、ディスプレイ数式かどうかを返す
+  function parseSpan(span) {
+    if (span.startsWith("$$")) return { tex: span.slice(2, -2), display: true };
+    if (span.startsWith("\\[")) return { tex: span.slice(2, -2), display: true };
+    if (span.startsWith("\\(")) return { tex: span.slice(2, -2), display: false };
+    if (span.startsWith("\\begin")) return { tex: span, display: true };
+    return { tex: span.slice(1, -1), display: false };
+  }
+
+  function renderMath(span) {
+    const { tex, display } = parseSpan(span);
+    try {
+      return { html: katex.renderToString(tex, { displayMode: display, throwOnError: true, strict: "ignore" }), error: null };
+    } catch (e) {
+      return { html: `<span class="kerror" title="${escapeHtml(e.message)}">KaTeX エラー: ${escapeHtml(span)}</span>`, error: e.message };
+    }
+  }
+
+  // 数式をプレースホルダに退避 → ブロック・インラインの簡易 Markdown 変換 → 数式を戻す
+  function renderMarkdown(md) {
+    const maths = [];
+    let errors = 0;
+    const masked = md.replace(MATH_SPAN, (span) => {
+      const r = renderMath(span);
+      if (r.error) errors += 1;
+      maths.push(r.html);
+      return `\u0001${maths.length - 1}\u0002`;
+    });
+    const inline = (s) => escapeHtml(s)
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+    const lines = masked.split("\n");
+    const out = [];
+    let i = 0;
+    let para = [];
+    const flush = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
+    const isTableSep = (l) => /^\s*\|?(?:\s*:?-{3,}:?\s*\|?)+\s*$/.test(l);
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (fence) {
+        flush();
+        const buf = []; i += 1;
+        while (i < lines.length && !lines[i].startsWith(fence[1])) { buf.push(lines[i]); i += 1; }
+        i += 1;
+        out.push(`<pre>${escapeHtml(buf.join("\n"))}</pre>`);
+        continue;
+      }
+      const h = line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i += 1; continue; }
+      if (/^ {0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); out.push("<hr>"); i += 1; continue; }
+      if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        flush();
+        const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+        let t = "<table><thead><tr>" + cells(line).map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
+        i += 2;
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+          t += "<tr>" + cells(lines[i]).map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>"; i += 1;
+        }
+        out.push(t + "</tbody></table>");
+        continue;
+      }
+      const li = line.match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+      if (li) {
+        flush();
+        const tag = /\d/.test(li[1]) ? "ol" : "ul";
+        let l = `<${tag}>`;
+        while (i < lines.length) {
+          const m = lines[i].match(/^\s*([-*+]|\d+\.)\s+(.*)$/);
+          if (!m) break;
+          l += `<li>${inline(m[2])}</li>`; i += 1;
+        }
+        out.push(l + `</${tag}>`);
+        continue;
+      }
+      if (!line.trim()) { flush(); i += 1; continue; }
+      para.push(line); i += 1;
+    }
+    flush();
+    const html = out.join("\n").replace(/\u0001(\d+)\u0002/g, (_, n) => maths[Number(n)]);
+    return { html, errors };
+  }
+
+  // ---------- 差分（比較対象 → 正解）----------
+  // LCS による汎用差分。a, b は文字列配列。[{op:"eq"|"del"|"add", v}] を返す
+  function diffSeq(a, b) {
+    const n = a.length, m = b.length;
+    const w = m + 1;
+    const t = new Uint16Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+      t[i * w + j] = a[i] === b[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
+    }
+    const ops = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { ops.push({ op: "eq", v: a[i] }); i++; j++; }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) { ops.push({ op: "del", v: a[i] }); i++; }
+      else { ops.push({ op: "add", v: b[j] }); j++; }
+    }
+    while (i < n) ops.push({ op: "del", v: a[i++] });
+    while (j < m) ops.push({ op: "add", v: b[j++] });
+    return ops;
+  }
+
+  function charDiffHtml(oldLine, newLine) {
+    if (oldLine.length > 1500 || newLine.length > 1500) return [escapeHtml(oldLine), escapeHtml(newLine)];
+    const ops = diffSeq([...oldLine], [...newLine]);
+    const render = (skip, cls) => ops.filter((o) => o.op !== skip)
+      .map((o) => (o.op === "eq" ? escapeHtml(o.v) : `<span class="${cls}">${escapeHtml(o.v)}</span>`)).join("");
+    return [render("add", "c-del"), render("del", "c-add")];
+  }
+
+  function renderDiff(oldText, newText) {
+    if (oldText === newText) return `<p class="empty">${escapeHtml(DATA.predLabel)}と正解は完全に一致しています。</p>`;
+    const ops = diffSeq(oldText.split("\n"), newText.split("\n"));
+    const html = [];
+    for (let k = 0; k < ops.length;) {
+      if (ops[k].op === "eq") { html.push(`<div class="diff-line">${escapeHtml(ops[k].v) || "&nbsp;"}</div>`); k++; continue; }
+      const dels = [], adds = [];
+      while (k < ops.length && ops[k].op !== "eq") { (ops[k].op === "del" ? dels : adds).push(ops[k].v); k++; }
+      const paired = Math.min(dels.length, adds.length);
+      for (let p = 0; p < paired; p++) {
+        const [o, n] = charDiffHtml(dels[p], adds[p]);
+        html.push(`<div class="diff-line del">− ${o}</div><div class="diff-line add">＋ ${n}</div>`);
+      }
+      for (let p = paired; p < dels.length; p++) html.push(`<div class="diff-line del">− ${escapeHtml(dels[p])}</div>`);
+      for (let p = paired; p < adds.length; p++) html.push(`<div class="diff-line add">＋ ${escapeHtml(adds[p])}</div>`);
+    }
+    return html.join("");
+  }
+
+  // ---------- 状態 ----------
+  const rendered = pages.map((p) => renderMarkdown(p.truth));       // 正解の描画結果（KaTeX エラー件数つき）
+  const predRendered = pages.map(() => null);                        // 比較対象の描画は表示時に作る
+  let current = 0;
+  let tab = "truth";
+  let zoom = null;                                                   // null = 幅に合わせる
+  let reviews = {};                                                  // ページ番号 → {status, memo}
+  let store = null;                                                  // {mode, save(page, rec), remove(page)}
+
+  const docId = (page) => "p" + String(page).padStart(4, "0");
+
+  // ---------- 保存先（db → localStorage）----------
+  const LS_KEY = "review-board:" + DATA.title;
+  function localStore() {
+    const read = () => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { return {}; } };
+    const write = (obj) => { try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); return true; } catch (e) { return false; } };
+    reviews = read();
+    return {
+      mode: "ローカル（このブラウザの localStorage。JSON をダウンロードして持ち出せます）",
+      async save(page, rec) { reviews[page] = rec; if (!write(reviews)) throw new Error("localStorage に保存できません"); },
+      async remove(page) { delete reviews[page]; write(reviews); },
+    };
+  }
+
+  async function initStore() {
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { db = null; }
+    if (!db) { store = localStore(); return; }
+    const col = db.collection("reviews");
+    store = {
+      mode: "Artifact の db（reviews コレクション）",
+      async save(page, rec) { await col.doc(docId(page)).set({ page, ...rec }); },
+      async remove(page) { await col.doc(docId(page)).delete(); },
+    };
+    col.onSnapshot((snap) => {
+      reviews = {};
+      snap.docs.forEach((d) => { const v = d.data(); reviews[v.page] = { status: v.status, memo: v.memo || "", updatedAt: v.updatedAt }; });
+      refreshAll(false);
+    }, (err) => { say("db を読み込めません: " + err.code); });
+  }
+
+  // ---------- 画面 ----------
+  const STATUS_LABEL = { ok: "OK", fix: "要修正" };
+  function say(text) { $("msg").textContent = text; }
+
+  function renderList() {
+    const nav = $("pages");
+    nav.textContent = "";
+    pages.forEach((p, idx) => {
+      const r = reviews[p.page];
+      const el = document.createElement("div");
+      el.className = "page-item";
+      el.tabIndex = 0;
+      el.setAttribute("role", "button");
+      if (idx === current) el.setAttribute("aria-current", "true");
+      const err = rendered[idx].errors;
+      el.innerHTML = `<span>p.${p.page}</span><span class="st ${r ? r.status : ""}">${r ? STATUS_LABEL[r.status] : "未"}</span>` +
+        `<span class="cat">${escapeHtml(p.category)}</span>` + (err ? `<span class="kerr">KaTeX ×${err}</span>` : "");
+      const go = () => select(idx);
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+      nav.appendChild(el);
+    });
+    const done = pages.filter((p) => reviews[p.page]).length;
+    const fix = pages.filter((p) => reviews[p.page] && reviews[p.page].status === "fix").length;
+    $("progress").textContent = `確認済み ${done}/${pages.length}（要修正 ${fix}）`;
+  }
+
+  function tabsFor(p) {
+    const tabs = [["truth", "正解（描画）"]];
+    if (DATA.hasPred) tabs.push(["pred", DATA.predLabel + "（描画）"], ["diff", `差分（${DATA.predLabel}→正解）`]);
+    tabs.push(["md", "Markdown"]);
+    if (p.notes) tabs.push(["notes", "照合記録"]);
+    return tabs;
+  }
+
+  function renderTabs() {
+    const p = pages[current];
+    const tabs = tabsFor(p);
+    if (!tabs.some(([k]) => k === tab)) tab = "truth";
+    const box = $("tabs");
+    box.textContent = "";
+    tabs.forEach(([k, label]) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "tab"; b.textContent = label;
+      b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(k === tab));
+      b.addEventListener("click", () => { tab = k; renderTabs(); renderContent(); });
+      box.appendChild(b);
+    });
+  }
+
+  function renderContent() {
+    const p = pages[current];
+    const box = $("content");
+    if (tab === "truth") box.innerHTML = rendered[current].html + (rendered[current].errors ? "" : "");
+    else if (tab === "pred") {
+      predRendered[current] = predRendered[current] || renderMarkdown(p.pred);
+      box.innerHTML = `<p class="badge">KaTeX エラー ${predRendered[current].errors} 件</p>` + predRendered[current].html;
+    } else if (tab === "diff") box.innerHTML = renderDiff(p.pred, p.truth);
+    else if (tab === "md") box.innerHTML = `<pre class="raw">${escapeHtml(p.truth)}</pre>`;
+    else if (tab === "notes") box.innerHTML = `<pre class="raw">${escapeHtml(p.notes)}</pre>`;
+    box.scrollTop = 0;
+  }
+
+  function renderReviewForm() {
+    const r = reviews[pages[current].page];
+    $("btn-ok").classList.toggle("on", !!r && r.status === "ok");
+    $("btn-fix").classList.toggle("on", !!r && r.status === "fix");
+    if (document.activeElement !== $("memo")) $("memo").value = r ? r.memo || "" : "";
+  }
+
+  function applyZoom() {
+    const img = $("pageimg");
+    if (zoom === null) { img.style.width = "100%"; $("zoom-label").textContent = "幅に合わせる"; }
+    else { img.style.width = img.naturalWidth * zoom + "px"; $("zoom-label").textContent = Math.round(zoom * 100) + "%"; }
+  }
+  function zoomBy(factor) {
+    const img = $("pageimg");
+    const base = zoom === null ? img.clientWidth / (img.naturalWidth || 1) : zoom;
+    zoom = Math.min(3, Math.max(0.2, base * factor));
+    applyZoom();
+  }
+
+  function select(idx) {
+    current = idx;
+    $("pageimg").src = pages[idx].image;
+    $("pageimg").alt = `原本 p.${pages[idx].page}`;
+    $("imgwrap").scrollTop = 0;
+    say("");
+    refreshAll(true);
+  }
+
+  function refreshAll(resetPane) {
+    renderList();
+    renderReviewForm();
+    if (resetPane) { renderTabs(); renderContent(); }
+  }
+
+  async function saveReview(status) {
+    const page = pages[current].page;
+    const rec = { status, memo: $("memo").value.trim(), updatedAt: new Date().toISOString() };
+    try {
+      await store.save(page, rec);
+      reviews[page] = rec;
+      say(`p.${page} を「${STATUS_LABEL[status]}」で保存しました`);
+    } catch (e) {
+      say("保存に失敗しました: " + (e.message || e.code || e));
+    }
+    refreshAll(false);
+  }
+
+  $("btn-ok").addEventListener("click", () => saveReview("ok"));
+  $("btn-fix").addEventListener("click", () => saveReview("fix"));
+  $("btn-clear").addEventListener("click", async () => {
+    const page = pages[current].page;
+    try { await store.remove(page); delete reviews[page]; say(`p.${page} を未確認に戻しました`); }
+    catch (e) { say("操作に失敗しました: " + (e.message || e.code || e)); }
+    $("memo").value = "";
+    refreshAll(false);
+  });
+  // メモだけ書き換えたときは、既に付けた判定を保ったまま保存する
+  $("memo").addEventListener("blur", () => {
+    const r = reviews[pages[current].page];
+    if (r && ($("memo").value.trim() !== (r.memo || ""))) saveReview(r.status);
+  });
+  $("zoom-in").addEventListener("click", () => zoomBy(1.25));
+  $("zoom-out").addEventListener("click", () => zoomBy(0.8));
+  $("zoom-fit").addEventListener("click", () => { zoom = null; applyZoom(); });
+  $("pageimg").addEventListener("load", applyZoom);
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "TEXTAREA" || e.isComposing) return;
+    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); select(Math.min(pages.length - 1, current + 1)); }
+    if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); select(Math.max(0, current - 1)); }
+  });
+
+  // 確認結果を JSON にして保存する（downloads capability があればそれ、無ければ <a download>）
+  $("export").addEventListener("click", async () => {
+    const rows = pages.filter((p) => reviews[p.page]).map((p) => ({ page: p.page, category: p.category, ...reviews[p.page] }));
+    const text = JSON.stringify({ title: DATA.title, exportedAt: new Date().toISOString(), reviews: rows }, null, 2);
+    const filename = "reviews.json";
+    try {
+      const dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null;
+      if (dl) { await dl.save({ filename, data: text }); return; }
+    } catch (e) { /* 下のフォールバック（ブラウザのダウンロード）へ */ }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // 起動
+  (async function start() {
+    await initStore();
+    $("storage").textContent = "保存先: " + store.mode;
+    select(0);
+  })();
+})();
+</script>
+</body>
+</html>

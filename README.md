@@ -208,6 +208,35 @@ uv run python -m ouj_notebook_converter.detectors \
 - 方程式・定義（片辺が文字 1 つや数値の等式、両辺の文字の組が異なる等式）、値によって成否が変わる不等式、
   「〜ではない」と否定された式は誤読候補にしない。日本語を含む項・解釈できない項・筆算や場合分けの環境はスキップし、件数を表示する
 
+### 人手確認用ページ（校正台）の生成
+
+評価セットの正解 Markdown を、原本ページ画像と並べて人手で確認するための HTML を生成する。
+左にページ一覧（層・確認状態・KaTeX エラー件数）、中央に原本画像（拡大縮小可）、右に
+「正解（描画）」「比較対象（描画）」「差分」「Markdown」「照合記録」のタブ、下部に「確認OK／要修正＋メモ」がある。
+
+```bash
+# 初回のみ: KaTeX（0.18.9）を取得する。CSS・フォント・JS は生成時に index.html へ埋め込む
+(cd scripts/katex_check && npm ci)
+uv sync --extra gemini   # ページ画像の JPEG 化に Pillow を使う
+
+uv run python -m ouj_notebook_converter.evaluation.review_board \
+  --truth /path/to/eval \
+  --pdf /path/to/原本.pdf \
+  --out /path/to/experiments/issue-N/board \
+  [--pred /path/to/draft_or_cache --pred-label "Gemini下書き"]
+```
+
+- 出力: `index.html`（KaTeX とデータを埋め込んだ 1 ファイル）、`data.json`（同じデータの複製）、`img/page_NNNN.jpg`（200 DPI グレースケール）。教材の画像・本文を含むためリポジトリには置かない
+- `--pred`（任意）: 精度評価と同じ形式（`page_NNNN.md` または `page_NNNN/raw.md`）。指定すると比較対象の描画と「比較対象→正解」の差分タブが現れる。manifest の全ページ分が必要
+- 数式の検出は変換時の後処理（`markdown_cleanup.MATH_SPAN`）の正規表現を `data.json` の `mathSpanPattern` に載せて使う。KaTeX で描画できない数式は赤く表示し、一覧にエラー件数を出す
+- テンプレートは `src/ouj_notebook_converter/evaluation/templates/review_board.html`
+
+確認結果の保存先と取り込み方:
+
+- ローカルで `index.html` を開いた場合（db が無い）: ブラウザの localStorage に保存する。ヘッダーの「確認結果を JSON でダウンロード」で `reviews.json`（`{"reviews": [{"page", "category", "status", "memo", "updatedAt"}]}`）を書き出せる。`status` は `ok` または `fix`
+- Artifact として公開した場合: `capabilities: {db: {}}` を宣言して公開する（`index.html` と `data.json`・`img/` を `files` で渡す）。確認結果は db の `reviews` コレクションに、ドキュメント ID `p0015`（ページ番号 4 桁）、本体 `{page, status, memo, updatedAt}` で保存される
+- db の結果の取り込み: Claude が `ArtifactData` の `list`（collection=`reviews`）で読み戻し、上記と同じ形式の JSON にして保存する。以降の処理（#24・#28 など）はその JSON を入力にする
+
 ## アーキテクチャ概要
 
 ```
