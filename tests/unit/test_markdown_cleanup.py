@@ -64,8 +64,8 @@ class TestTag:
         assert normalize_ocr_markdown(text) == text
 
     def test_keeps_tag_only_non_equation_environment(self) -> None:
-        """equation 以外の環境（eqnarray* など）は tag だけでも変更しない。"""
-        text = "\\begin{eqnarray*}\n\\tag{1.4}\n\\end{eqnarray*}"
+        """equation 以外の環境（align* など）は tag だけでも変更しない。"""
+        text = "\\begin{align*}\n\\tag{1.4}\n\\end{align*}"
 
         assert normalize_ocr_markdown(text) == text
 
@@ -208,5 +208,55 @@ class TestNoChange:
     def test_keeps_markdown_without_breakage(self) -> None:
         """通常の本文は変更しない。"""
         text = "# 1 数の概念\n\n## 1.1 自然数 (A)\n\n**例 1.1** 自然数の和 $1 + 2 = 3$ を考える。\n"
+
+        assert normalize_ocr_markdown(text) == text
+
+
+class TestKatexUnsupportedMarkup:
+    """KaTeX が描画できない表記のうち、数式の意味を変えずに置き換えられるもの。"""
+
+    def test_eqnarray_starをalignedに置き換える(self) -> None:
+        """番号を付けない eqnarray* は aligned に置き換え、行の内容は変えない。"""
+        text = "\\begin{eqnarray*}\n\\text{加法の結合法則} & (1.4)\n\\end{eqnarray*}"
+
+        assert normalize_ocr_markdown(text) == (
+            "\\begin{aligned}\n\\text{加法の結合法則} & (1.4)\n\\end{aligned}"
+        )
+
+    def test_ドルで囲まれたeqnarray_starも置き換える(self) -> None:
+        text = "$$\n\\begin{eqnarray*}\na &=& b\n\\end{eqnarray*}\n$$"
+
+        assert normalize_ocr_markdown(text) == "$$\n\\begin{aligned}\na &=& b\n\\end{aligned}\n$$"
+
+    def test_番号付きのeqnarrayは式番号が失われるため置き換えない(self) -> None:
+        text = "\\begin{eqnarray}\na &=& b\n\\end{eqnarray}"
+
+        assert normalize_ocr_markdown(text) == text
+
+    def test_array環境の列指定から_at式を取り除く(self) -> None:
+        """@{...} は列間の空白指定にすぎないため、取り除いても式の意味は変わらない。"""
+        text = "$$\\begin{array}{r@{\\,}l}\n2 & 24 \\\\\n3 & 12\n\\end{array}$$"
+
+        assert normalize_ocr_markdown(text) == (
+            "$$\\begin{array}{rl}\n2 & 24 \\\\\n3 & 12\n\\end{array}$$"
+        )
+
+    def test_列指定の外の_atは変更しない(self) -> None:
+        """array の列指定以外に現れる @{ は取り除かない。"""
+        text = "$\\text{@{x}}$ と $\\begin{array}{c}@{y}\\end{array}$"
+
+        assert normalize_ocr_markdown(text) == text
+
+    def test_cline_multicolumn_encloseは意味が変わるため変更しない(self) -> None:
+        """罫線の範囲・セルの結合・割り算記号は KaTeX に同等の表記が無く、置き換えると意味が変わる。"""
+        text = (
+            "$$\\begin{array}{r|rr}2 & 24 & 36 \\\\\n\\cline{2-3}\n"
+            "\\multicolumn{2}{c}{x}\\end{array}$$\n$\\enclose{longdiv}{12}$"
+        )
+
+        assert normalize_ocr_markdown(text) == text
+
+    def test_コードフェンス内のeqnarray_starは変更しない(self) -> None:
+        text = "```\n\\begin{eqnarray*}\na\n\\end{eqnarray*}\n```"
 
         assert normalize_ocr_markdown(text) == text
