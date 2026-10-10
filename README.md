@@ -501,6 +501,78 @@ uv run python -m ouj_notebook_converter.detectors.multi_run_variance \
 - `dissent`: 基準の実行と文字列が異なる実行の数（`run_count - 1` に近いほど、どの実行も一致しない箇所）
 - `formula_indices`: `formula` のみ。範囲に含まれる基準の実行の数式の番号（全数式を出現順に数えた 0 始まり）
 
+### 誤読候補の LLM 判定（プロトタイプ）
+
+各検出器（等式の検算・書籍内整合性の低頻度語・yomitoku との差分・KaTeX 描画不能）が挙げた候補を、
+原本画像の該当部分・OCR の該当行・検出器の根拠と一緒に Gemini に渡し、「誤読か」「正しい表記」を
+構造化出力（JSON）で判定させる。判定結果は修正ファイル（上の「人手修正ファイル」、`version: 1`）に書き出せる。
+連番検査（`numbering`）は「無いもの」の報告で置換の対象となる文字列が無いため、判定の対象にしない。
+
+```bash
+uv sync --extra verify --extra gemini
+export GEMINI_API_KEY=...
+
+# 1. 各検出器の候補を集め、原本画像上の位置を推定する（候補ファイル candidates.json）
+uv run python -m ouj_notebook_converter.judge collect \
+  --pred /path/to/gemini_cache --yomitoku /path/to/yomitoku_cache --out candidates.json
+
+# 2. 候補を原本画像と一緒に判定させる（判定結果 judgments.json、LLM に渡した画像は crops/ に保存）
+uv run python -m ouj_notebook_converter.judge judge \
+  --candidates candidates.json --pdf /path/to/原本.pdf --model gemini-3.1-pro-preview \
+  --out judgments.json --crops-dir crops
+
+# 3. 修正ファイル（自動適用 corrections.json・確認待ち corrections_pending.json・振り分け結果 decisions.json）
+uv run python -m ouj_notebook_converter.judge export \
+  --candidates candidates.json --judgments judgments.json --pred /path/to/gemini_cache --out-dir out
+
+# 4. 評価セットで判定の正誤・修正適用後の指標・コストを測る
+uv run python -m ouj_notebook_converter.judge evaluate \
+  --truth /path/to/eval --pred /path/to/gemini_cache --candidates candidates.json \
+  --judgments judgments.json --known-corrections /path/to/corrections.json --labels labels.json
+```
+
+- `collect`: `--source` で検出器を選ぶ（既定は `equation_check` `rare_word` `cross_ocr_diff` `katex_error`。`--yomitoku` が無ければ `cross_ocr_diff` は使わない）。
+  検出器には後処理前の `raw.md` をそのまま渡す（修正ファイルの `before` は `raw.md` 上の表記で書くため）。等式の検算（約 4 分）が大半の時間を占める
+- `judge`: `--image-mode crop`（既定。該当箇所の切り出し）と `page`（ページ全体を長辺 `--page-max-side` px に縮小）を選ぶ。API の失敗・応答不正は握りつぶさず、判定結果の `error` に記録して終了コード 1 にする
+- `export`: `--judgments` を複数指定すると、全ての判定が同じ修正で一致したものだけを自動適用する（`--min-agree` で一致数を変えられる）。不一致や判断不能は確認待ちになる
+- `evaluate`: `--judgments a.json+b.json` のように `+` でつなぐと、複数の判定の合意で評価する。`--labels` は `{候補 id: "misread" | "correct"}` の JSON で、
+  評価セット内は既知の人手修正（`--known-corrections`）の置換前の文字列を抜粋に含む候補を真の誤読とし、手動ラベルで上書きする。評価セット外の候補にラベルを付けると別枠で集計する
+
+#### 候補の位置の特定（Gemini 出力には bbox が無い）
+
+1. `cross_ocr_diff` は yomitoku の単語（行）の `bbox` を持つ。ただし yomitoku 側の対応の取り違えで `bbox` が別の箇所を指すことがあるため、Gemini の行を yomitoku の段落に対応付けた結果（下の 2.）と食い違えば、対応付けた段落に置き換える
+2. 日本語を 6 文字以上含む Gemini の行を、日本語部分の文字 2-gram の Dice 係数（0.5 以上）が最大の yomitoku の段落に対応付ける（`line_alignment`）
+3. 数式だけの行は日本語が無く対応付けできないため、前後の「対応付けできた行」の段落に挟まれた帯とする（`band_between`）。片側しか無ければ、その段落から 300 px 分伸ばす
+4. どれでも特定できなければページ全体を渡す（`page`）
+
+切り出しは bbox の上下に 80 px の余白を付け、横幅は全幅にする（単語だけの bbox だと行が途中で切れ、LLM が行の一部だけを見て誤った修正を出すため）。画像は 200 DPI で描画する。
+LLM に渡す OCR の抜粋は、該当行と前後の非空行（見つからなければページ全体）。cross_ocr_diff の文脈が複数の行に一致するときは、先頭の行ではなく bbox を含む段落に対応付けた行に絞る（決まらなければページ全体）。
+
+#### 判定と自動適用の基準
+
+LLM の出力は `transcription`（OCR を見ずに画像から書き写した文字列）、`verdict`（`misread` / `correct` / `uncertain`）、`confidence`（`high` / `medium` / `low`）、
+`before`（抜粋にそのまま現れる置換前の文字列）、`after`、`reason`。`before` がページ内で複数に一致する場合は、抜粋の位置を手がかりに前後の文字を足して一意にする。
+振り分けの規則（`judge/policy.py`）:
+
+| 判定 | 扱い |
+|---|---|
+| 判定失敗・`uncertain` | 確認待ち |
+| `correct`（確信度が low 以外） | 棄却（修正しない） |
+| `correct`（確信度 low） | 確認待ち |
+| `misread` で、置換前が一意に決まらない／置換が空・変化なし | 確認待ち |
+| `misread` で、確信度が `high` 未満・検出器が `katex_error`・変更が 8 文字を超える・一致した判定が `--min-agree` 未満 | 確認待ち（置換の提案は `corrections_pending.json`） |
+| 上記以外の `misread` | **自動適用**（`corrections.json`） |
+
+同じ誤読を複数の検出器が挙げた場合は、置換後の文字列が既にあれば重複として 1 件だけ書き出す。`katex_error` を自動適用から外すのは、
+描画できない数式（`\cline` など KaTeX が未対応の記法）は誤読とは限らず、LLM が数式を書き換えても原本の誤読を直したことにならないため（上位モデルは実際に書き換えを提案した）。
+
+#### 測定結果（初歩からの数学、人手修正前の Gemini キャッシュ）
+
+- 候補は 314 ページで 135 件（`equation_check` 3・`rare_word` 52・`cross_ocr_diff` 77・`katex_error` 3）。評価セット（33 ページ）には 22 件
+- 判定モデルは `gemini-3.5-flash-lite`・`gemini-3.8-flash`・`gemini-3.1-pro-preview` を比較した（単価は `judge/pricing.py`）。詳細は #24 の完了報告コメントを参照
+- 上位モデル（`gemini-3.1-pro-preview`）の切り出し画像判定を既定の推奨構成とした。評価セットでは真の誤読 7 件すべてを誤読と判定して正しい修正を出し、自動適用した修正に誤りは無かった
+- 314 ページ全体では自動適用 13 件（12 ページ）・確認待ち・棄却に振り分けた。API 料金は 135 候補で約 2.2 USD（1 ページあたり約 0.007 USD）
+
 ## アーキテクチャ概要
 
 ```
