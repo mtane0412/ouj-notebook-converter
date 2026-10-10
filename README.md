@@ -400,6 +400,29 @@ uv run python -m ouj_notebook_converter.evaluation.review_board \
 - Artifact として公開した場合: `capabilities: {db: {}}` を宣言して公開する（`index.html` と `data.json`・`img/` を `files` で渡す）。確認結果は db の `reviews` コレクションに、ドキュメント ID `p0015`（ページ番号 4 桁）、本体 `{page, status, memo, updatedAt}` で保存される
 - db の結果の取り込み: Claude が `ArtifactData` の `list`（collection=`reviews`）で読み戻し、上記と同じ形式の JSON にして保存する。以降の処理（#24・#28 など）はその JSON を入力にする
 
+### 評価セットのページだけを条件を変えて再 OCR する（実験用）
+
+解像度・Gemini モデル・プロンプトを変えたときの精度を比べるための実験用ハーネス。評価セット（`manifest.json`）のページだけを再 OCR し、精度評価にそのまま渡せる形式で出力する。
+
+```bash
+export GEMINI_API_KEY=...   # または --api-key
+
+uv run python -m ouj_notebook_converter.evaluation.reocr \
+  --truth /path/to/eval --pdf /path/to/原本.pdf \
+  --dpi 300 --model gemini-3.8-flash \
+  --out /path/to/experiments/issue-25/flash-300dpi \
+  [--prompt-file prompt.txt] [--run-id run1]
+
+# 出力をそのまま評価できる
+uv run python -m ouj_notebook_converter.evaluation \
+  --truth /path/to/eval --pred /path/to/experiments/issue-25/flash-300dpi
+```
+
+- 出力: `page_NNNN/raw.md`（OCR 結果）、`page_NNNN/usage.json`（処理時間・試行回数・トークン使用量）、`run.json`（条件と合計）
+- `--run-id`: 繰り返し実行用。指定すると `<out>/<run-id>/` に出力する
+- 中断しても同じコマンドで再開できる（完了済みページは API を呼ばない）。レート制限（HTTP 429/500/503）は待って再試行する
+- ページキャッシュ（`ounc`）のディレクトリ名は、既定以外のモデル・DPI を指定すると `…gemini-<モデル名>-<DPI>dpi` のように分かれる（既定値は従来どおり `…gemini`）
+
 ## アーキテクチャ概要
 
 ```
