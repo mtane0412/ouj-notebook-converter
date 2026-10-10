@@ -341,3 +341,75 @@ class TestCreateGeminiAnalyzer:
             analyzer = gemini_module.create_gemini_analyzer(api_key="テスト用APIキー")
 
         assert analyzer._model == "gemini-3.8-flash"
+
+
+# ---------------------------------------------------------------------------
+# プロンプト差し替えと usage_metadata の取得（issue #25）
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiAnalyzerPromptAndUsage:
+    """プロンプトの差し替えとトークン使用量の取得を検証する。"""
+
+    def _call(self, mock_genai: MagicMock, **analyzer_kwargs: object) -> object:
+        """モックを差し込んで GeminiAnalyzer を 1 回呼び、analyzer を返す。"""
+        mock_types = MagicMock()
+        with patch.dict(
+            sys.modules,
+            {
+                "google": MagicMock(genai=mock_genai),
+                "google.genai": mock_genai,
+                "google.genai.types": mock_types,
+            },
+        ):
+            import importlib
+
+            import ouj_notebook_converter.plugins.ocr.gemini as gemini_module
+
+            importlib.reload(gemini_module)
+            analyzer = gemini_module.GeminiAnalyzer(api_key="テスト用APIキー", **analyzer_kwargs)
+            analyzer(np.zeros((10, 10, 3), dtype=np.uint8))
+        return analyzer
+
+    def test_プロンプト未指定なら既定の日本語OCRプロンプトを送る(self) -> None:
+        mock_genai = _build_mock_genai()
+        self._call(mock_genai)
+
+        contents = mock_genai.Client.return_value.models.generate_content.call_args.kwargs[
+            "contents"
+        ]
+        from ouj_notebook_converter.plugins.ocr.gemini import _GEMINI_OCR_PROMPT
+
+        assert contents[1] == _GEMINI_OCR_PROMPT
+
+    def test_プロンプトを指定するとその文字列を送る(self) -> None:
+        mock_genai = _build_mock_genai()
+        self._call(mock_genai, prompt="数式を丁寧に書き起こしてください")
+
+        contents = mock_genai.Client.return_value.models.generate_content.call_args.kwargs[
+            "contents"
+        ]
+        assert contents[1] == "数式を丁寧に書き起こしてください"
+
+    def test_last_usageにusage_metadataのトークン数が入る(self) -> None:
+        mock_genai = _build_mock_genai()
+        usage = mock_genai.Client.return_value.models.generate_content.return_value.usage_metadata
+        usage.prompt_token_count = 1200
+        usage.candidates_token_count = 800
+        usage.thoughts_token_count = 300
+        usage.total_token_count = 2300
+
+        analyzer = self._call(mock_genai)
+
+        assert analyzer.last_usage.prompt_tokens == 1200  # type: ignore[attr-defined]
+        assert analyzer.last_usage.output_tokens == 800  # type: ignore[attr-defined]
+        assert analyzer.last_usage.thinking_tokens == 300  # type: ignore[attr-defined]
+        assert analyzer.last_usage.total_tokens == 2300  # type: ignore[attr-defined]
+
+    def test_usage_metadataが無いレスポンスではlast_usageはNone(self) -> None:
+        mock_genai = _build_mock_genai()
+        mock_genai.Client.return_value.models.generate_content.return_value.usage_metadata = None
+
+        analyzer = self._call(mock_genai)
+
+        assert analyzer.last_usage is None  # type: ignore[attr-defined]

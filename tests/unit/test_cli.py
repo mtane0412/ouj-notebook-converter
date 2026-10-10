@@ -540,7 +540,11 @@ class TestCacheDirPerOcrBackend:
     """ページキャッシュが OCR バックエンドごとに分離されることのテスト（issue #13）。"""
 
     def _invoke_and_capture_cache_dir(
-        self, mocker: MagicMock, tmp_path: Path, ocr_backend: str
+        self,
+        mocker: MagicMock,
+        tmp_path: Path,
+        ocr_backend: str,
+        extra_args: list[str] | None = None,
     ) -> Path:
         """指定バックエンドで CLI を実行し、run_pages に渡された cache_dir を返す。"""
         pdf_path = tmp_path / "テスト教材.pdf"
@@ -565,6 +569,7 @@ class TestCacheDirPerOcrBackend:
                 "--outdir", str(tmp_path / "out"),
                 "--ocr-backend", ocr_backend,
                 "--gemini-api-key", "テスト用APIキー",
+                *(extra_args or []),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -586,6 +591,60 @@ class TestCacheDirPerOcrBackend:
         assert gemini_dir != yomitoku_dir
         # 同じ PDF のキャッシュは同じ親ディレクトリ配下に並ぶこと
         assert gemini_dir.parent == yomitoku_dir.parent
+
+
+class TestCacheDirPerModelAndDpi:
+    """ページキャッシュがモデル名・DPI ごとに分離されることのテスト（issue #25）。"""
+
+    _helper = TestCacheDirPerOcrBackend()
+
+    def _cache_name(self, mocker: MagicMock, tmp_path: Path, extra: list[str]) -> str:
+        return self._helper._invoke_and_capture_cache_dir(
+            mocker, tmp_path, "gemini", extra
+        ).name
+
+    def test_既定のモデルとDPIでは従来のディレクトリ名を維持する(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """既存キャッシュとの互換性のため、既定値ではサフィックスを付けない。"""
+        assert self._cache_name(mocker, tmp_path, []).endswith(".gemini")
+
+    def test_DPIが既定と異なるとディレクトリ名にDPIが含まれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        name = self._cache_name(mocker, tmp_path, ["--dpi", "300"])
+        assert name.endswith(".gemini-300dpi")
+
+    def test_モデルが既定と異なるとディレクトリ名にモデル名が含まれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        name = self._cache_name(mocker, tmp_path, ["--gemini-model", "gemini-3.1-pro-preview"])
+        assert name.endswith(".gemini-gemini-3.1-pro-preview")
+
+    def test_モデルとDPIの両方が既定と異なる場合は両方が含まれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        name = self._cache_name(
+            mocker, tmp_path, ["--gemini-model", "gemini-3.1-pro-preview", "--dpi", "400"]
+        )
+        assert name.endswith(".gemini-gemini-3.1-pro-preview-400dpi")
+
+    def test_yomitokuでもDPIが異なればディレクトリが分かれる(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        default = self._helper._invoke_and_capture_cache_dir(mocker, tmp_path, "yomitoku")
+        dpi300 = self._helper._invoke_and_capture_cache_dir(
+            mocker, tmp_path, "yomitoku", ["--dpi", "300"]
+        )
+        assert default != dpi300
+
+    def test_yomitokuではGeminiモデル名をディレクトリ名に含めない(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        name = self._helper._invoke_and_capture_cache_dir(
+            mocker, tmp_path, "yomitoku", ["--gemini-model", "gemini-3.1-pro-preview"]
+        ).name
+        assert name.endswith(".yomitoku")
 
 
 class TestCorrectionsOption:
