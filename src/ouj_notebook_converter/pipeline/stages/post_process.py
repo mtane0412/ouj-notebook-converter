@@ -2,6 +2,8 @@
 
 OCR の生 Markdown を読み込み、数式 overlay があれば LaTeX に置換し、
 OCR 由来の LaTeX 残骸・見出しレベルの揺れを正規化した上で PageMarkdown を返す。
+人手修正（corrections）は raw.md の読み込み直後（数式 overlay・正規化より前）に適用する。
+修正ファイルの置換前文字列は raw.md 上の表記で書かれるため、後続処理の影響を受けない。
 figure パスの相対→絶対変換や書き換えは行わない（exporter が担当）。
 
 数式置換の 2 系統:
@@ -14,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 
+from ouj_notebook_converter.corrections import Correction, apply_corrections
 from ouj_notebook_converter.pipeline.stages.markdown_cleanup import normalize_ocr_markdown
 from ouj_notebook_converter.pipeline.types import MathOverlay, PageAnalysis, PageMarkdown
 
@@ -105,25 +108,31 @@ def build_page_markdown(
     analysis: PageAnalysis,
     *,
     math_overlay: MathOverlay | None = None,
+    corrections: tuple[Correction, ...] = (),
 ) -> PageMarkdown:
     """PageAnalysis から PageMarkdown を生成する純粋関数。
 
     Args:
         analysis: analyze ステージの出力。
         math_overlay: math_extract ステージの出力。指定すると数式を LaTeX に置換する。
+        corrections: このページに適用する人手修正。raw.md のテキストに対して記載順に適用する
+            （キャッシュのファイルは書き換えない）。
 
     Returns:
         PageMarkdown（referenced_assets には figure の絶対パスを格納）。
 
     Raises:
         FileNotFoundError: markdown_raw_path が存在しない場合。
+        CorrectionError: 修正の置換前文字列が見つからない、または複数一致する場合。
     """
     if not analysis.markdown_raw_path.exists():
         raise FileNotFoundError(
             f"raw Markdown ファイルが見つかりません: {analysis.markdown_raw_path}"
         )
 
-    raw_text = analysis.markdown_raw_path.read_text(encoding="utf-8")
+    raw_text = apply_corrections(
+        analysis.markdown_raw_path.read_text(encoding="utf-8"), corrections
+    )
 
     if math_overlay is not None:
         markdown_text = _apply_math_overlay(raw_text, math_overlay)
