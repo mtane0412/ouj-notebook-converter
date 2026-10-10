@@ -40,7 +40,7 @@ def _make_katex_dist(root: Path) -> Path:
 
 def _make_truth(root: Path) -> Path:
     truth = root / "eval"
-    truth.mkdir()
+    truth.mkdir(parents=True)
     (truth / "manifest.json").write_text(
         json.dumps(
             {"pages": [{"page": 2, "category": "数式中心"}, {"page": 1, "category": "地の文中心"}]},
@@ -116,6 +116,22 @@ class TestBuildBoardData:
         assert data["pages"][0]["image"] == "img/page_0002.jpg"
         assert data["pages"][0]["category"] == "数式中心"
         assert data["hasPred"] is False
+
+    def test_boardIdは評価セットの内容で決まり再生成では変わらない(self, tmp_path: Path) -> None:
+        truth_a = _make_truth(tmp_path / "a")
+        truth_b = _make_truth(tmp_path / "b")
+        (truth_b / "manifest.json").write_text(
+            json.dumps({"pages": [{"page": 7, "category": "筆算・表"}]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (truth_b / "page_0007.md").write_text("筆算の例", encoding="utf-8")
+
+        first = build_board_data(truth_a, None, title="校正台")["boardId"]
+        again = build_board_data(truth_a, None, title="別の表題")["boardId"]
+        other = build_board_data(truth_b, None, title="校正台")["boardId"]
+
+        assert first == again
+        assert first != other
 
     def test_数式の検出規則はMATH_SPANと同じ正規表現を渡す(self, tmp_path: Path) -> None:
         data = build_board_data(_make_truth(tmp_path), None, title="試験")

@@ -23,6 +23,7 @@ KaTeX で描画した Markdown を 1 枚の HTML にまとめ、人手での確�
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -31,6 +32,7 @@ from typing import Annotated, Any
 import typer
 
 from ouj_notebook_converter.evaluation.dataset import (
+    MANIFEST_FILENAME,
     load_manifest,
     read_prediction,
     read_truth,
@@ -160,8 +162,12 @@ def build_board_data(
                 "notes": (note_path.read_text(encoding="utf-8") if note_path.is_file() else None),
             }
         )
+    manifest_bytes = (truth_dir / MANIFEST_FILENAME).read_bytes()
     return {
         "title": title,
+        # localStorage のキーに使う ID。manifest.json の内容で決まるため、同じ評価セットの
+        # 再生成では変わらず、評価セットが異なれば（--title が同じでも）変わる
+        "boardId": hashlib.sha256(manifest_bytes).hexdigest()[:12],
         "katexVersion": KATEX_VERSION,
         "mathSpanPattern": MATH_SPAN.pattern,
         "hasPred": pred_dir is not None,

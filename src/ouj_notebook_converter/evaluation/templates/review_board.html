@@ -272,7 +272,7 @@ button.fix.on { background: var(--fix-bg); color: var(--fix); border-color: var(
   const docId = (page) => "p" + String(page).padStart(4, "0");
 
   // ---------- 保存先（db → localStorage）----------
-  const LS_KEY = "review-board:" + DATA.title;
+  const LS_KEY = "review-board:" + DATA.boardId;
   function localStore() {
     const read = () => { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { return {}; } };
     const write = (obj) => { try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); return true; } catch (e) { return false; } };
@@ -280,7 +280,12 @@ button.fix.on { background: var(--fix-bg); color: var(--fix); border-color: var(
     return {
       mode: "ローカル（このブラウザの localStorage。JSON をダウンロードして持ち出せます）",
       async save(page, rec) { reviews[page] = rec; if (!write(reviews)) throw new Error("localStorage に保存できません"); },
-      async remove(page) { delete reviews[page]; write(reviews); },
+      async remove(page) {
+        const next = { ...reviews };
+        delete next[page];
+        if (!write(next)) throw new Error("localStorage に保存できません");
+        reviews = next;
+      },
     };
   }
 
@@ -398,7 +403,13 @@ button.fix.on { background: var(--fix-bg); color: var(--fix); border-color: var(
     if (resetPane) { renderTabs(); renderContent(); }
   }
 
-  async function saveReview(status) {
+  // 保存・削除を 1 本の Promise 連鎖で直列化する（blur による保存と「未確認に戻す」の競合を防ぐ）
+  let queue = Promise.resolve();
+  const enqueue = (task) => { queue = queue.then(task, task); return queue; };
+
+  function saveReview(status) { return enqueue(() => doSaveReview(status)); }
+
+  async function doSaveReview(status) {
     const page = pages[current].page;
     const rec = { status, memo: $("memo").value.trim(), updatedAt: new Date().toISOString() };
     try {
@@ -413,13 +424,12 @@ button.fix.on { background: var(--fix-bg); color: var(--fix); border-color: var(
 
   $("btn-ok").addEventListener("click", () => saveReview("ok"));
   $("btn-fix").addEventListener("click", () => saveReview("fix"));
-  $("btn-clear").addEventListener("click", async () => {
+  $("btn-clear").addEventListener("click", () => enqueue(async () => {
     const page = pages[current].page;
-    try { await store.remove(page); delete reviews[page]; say(`p.${page} を未確認に戻しました`); }
+    try { await store.remove(page); delete reviews[page]; $("memo").value = ""; say(`p.${page} を未確認に戻しました`); }
     catch (e) { say("操作に失敗しました: " + (e.message || e.code || e)); }
-    $("memo").value = "";
     refreshAll(false);
-  });
+  }));
   // メモだけ書き換えたときは、既に付けた判定を保ったまま保存する
   $("memo").addEventListener("blur", () => {
     const r = reviews[pages[current].page];
