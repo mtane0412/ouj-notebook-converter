@@ -208,6 +208,64 @@ uv run python -m ouj_notebook_converter.detectors \
 - 方程式・定義（片辺が文字 1 つや数値の等式、両辺の文字の組が異なる等式）、値によって成否が変わる不等式、
   「〜ではない」と否定された式は誤読候補にしない。日本語を含む項・解釈できない項・筆算や場合分けの環境はスキップし、件数を表示する
 
+### yomitoku との差分による地の文の誤読候補の検出（プロトタイプ）
+
+Gemini と yomitoku の OCR 結果を日本語部分（かな・漢字）だけで比較し、食い違い箇所を誤読候補として抽出する。
+数式は yomitoku では構造が失われるため比較しない（Gemini の数式の位置は区切りとして扱う）。
+どちらが正しいかは判定しない（後段の LLM 判定に渡す入力を作る）。
+
+```bash
+uv run python -m ouj_notebook_converter.detectors.cross_ocr_diff \
+  --gemini /path/to/gemini_cache \
+  --yomitoku /path/to/yomitoku_cache \
+  --truth /path/to/eval \
+  --json result.json
+```
+
+- `--gemini`: Gemini の出力（`--no-combine`）またはページキャッシュ（`page_NNNN/raw.md`）。精度評価の `--pred` と同じ
+- `--yomitoku`: yomitoku のページキャッシュ。各ページの `page_NNNN/analysis.json`（段落の位置・図の領域・単語）を使う。無いページがあればエラーにする
+- `--truth`（任意）: 評価セットのページについて、適合率・再現率を表示する。誤読は「Gemini の地の文と正解の地の文を文字単位で比べたときの、かな・漢字を含む食い違い」、
+  誤読候補が誤読に当たるとは「候補の Gemini 側の位置が誤読の位置と 1 文字以内で重なる」こと。
+  適合率 = 誤読に当たった候補数 / 候補数、再現率 = 候補が当たった誤読数 / 誤読数
+- ノイズ除去（`--no-exclude-figures`・`--no-exclude-header`・`--no-normalize-variants`・`--min-run-length` で個別に無効化できる）
+  - 図の領域にある段落と、ページ上部の帯（柱）にある段落は比較しない
+  - 「一」と「ー」、小書きの仮名と通常の仮名は同じ文字とみなし、yomitoku 側が「ー」だけを読んだ食い違い（数式のマイナス・分数線）は候補にしない
+  - Gemini の数式・変数の位置に yomitoku が 1〜2 文字の仮名・記号を読んだ食い違い、段落に取り込まれた図番号の「図」「表」は候補にしない
+  - 置き換えの片側が 5 文字を超える食い違いは、読む順序の違いによる対応の取り違えとして候補にしない
+  - Gemini に対応箇所が無い日本語の連続は、既定では候補にせず件数だけ数える（`--report-unmatched` で候補にする）
+
+#### 後段の LLM 判定（#24）への入力形式
+
+`--json` の出力は次の形式（`format_version: 1`）。`candidates` の各要素が 1 つの食い違い。
+
+```json
+{
+  "format_version": 1,
+  "options": {"min_run_length": 3, "exclude_figures": true, "exclude_header": true,
+              "normalize_variants": true, "report_unmatched": false, "context_chars": 15},
+  "page_count": 314,
+  "stats": {"paragraphs": 3670, "runs": 10578, "runs_exact": 7618, "...": 0},
+  "candidate_count": 77,
+  "candidates": [
+    {
+      "page": 60,
+      "kind": "gemini_only",
+      "gemini": {"text": "制", "context_before": "かの数の並びが無", "context_after": "限に繰り返されて"},
+      "yomitoku": {"text": "", "context_before": "かの数の並びが無", "context_after": "限に繰り返されて",
+                   "bbox": [110, 802, 996, 1433], "bbox_source": "paragraph"}
+    }
+  ],
+  "scores": {"pages": ["..."], "total": {"precision": 0.214, "recall": 1.0}}
+}
+```
+
+- `page`: ページ番号（PDF の 1 始まり）。原本画像は `bbox` を切り出して LLM に見せられる
+- `kind`: `replace`（両方に文字があり異なる）／`gemini_only`（Gemini にだけある）／`yomitoku_only`（yomitoku にだけある。Gemini の脱落の疑い）／`unmatched_run`（`--report-unmatched` のときだけ）
+- `gemini.text`: Gemini 側の食い違い部分。`yomitoku_only` では空で、`context_before` と `context_after` の間が挿入位置になる。
+  `context_*` は Gemini の地の文（空白と Markdown 記法を除き NFKC 正規化したもの）の前後 15 文字で、数式のあった位置は `〔数式〕` と書く
+- `yomitoku.text`: yomitoku 側の食い違い部分（`gemini_only` では空）。`context_*` は同じ段落内の前後 15 文字
+- `yomitoku.bbox`: `[x0, y0, x1, y1]`（200 DPI で描画した原本ページ画像の px 座標）。食い違い部分を含む単語（行）が 1 つに決まれば `bbox_source: "word"`、決まらなければ段落の座標で `"paragraph"`
+
 ## アーキテクチャ概要
 
 ```
