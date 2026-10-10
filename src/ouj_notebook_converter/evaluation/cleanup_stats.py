@@ -66,12 +66,27 @@ def _count_chunk(text: str, counts: Counter[str]) -> None:
 
 
 def _count_prose(text: str, counts: Counter[str]) -> None:
+    """数式の外側（地の文）に残った LaTeX 残骸の件数を counts に加算する。
+
+    Args:
+        text: 数式スパンを含まない地の文の断片。
+        counts: ルール名ごとの発火件数（呼び出し側と共有し、破壊的に更新する）。
+    """
     counts["hfill"] += len(mc._HFILL.findall(text))
     counts["tag"] += len(mc._TAG.findall(text))
     counts["quad"] += len(mc._QQUAD.findall(text)) + len(mc._QUAD.findall(text))
 
 
 def _count_math(span: str, counts: Counter[str]) -> None:
+    """1 つの数式スパンについて、後処理で直せる破綻と直せない破綻の件数を counts に加算する。
+
+    Args:
+        span: 区切り記号（$ や $$）を含む数式スパン。
+        counts: ルール名ごとの発火件数（呼び出し側と共有し、破壊的に更新する）。
+
+    注意:
+        unfixable_* は後処理で変換しない（KaTeX で描画できないまま残る）命令の件数である。
+    """
     counts["eqnarray_star"] += len(_EQNARRAY_STAR_BEGIN.findall(span))
     for column_spec in mc._ARRAY_COLUMN_SPEC.finditer(span):
         if mc._COLUMN_SPACING.search(column_spec.group(2)):
