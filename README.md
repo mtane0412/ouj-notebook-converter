@@ -208,6 +208,25 @@ uv run python -m ouj_notebook_converter.detectors \
 - 方程式・定義（片辺が文字 1 つや数値の等式、両辺の文字の組が異なる等式）、値によって成否が変わる不等式、
   「〜ではない」と否定された式は誤読候補にしない。日本語を含む項・解釈できない項・筆算や場合分けの環境はスキップし、件数を表示する
 
+### 式番号・例番号・脚注番号の連番検査（プロトタイプ）
+
+式番号 (N.M)・ラベル（例・練習・コメント・図・定理・命題・系）・脚注番号が章ごとに連番であることを使い、
+OCR が落とした式・ラベル・脚注や、誤読した番号を検出する。本文中の参照（「(2.9) より」）は定義と区別して数える。
+`detectors/cli.py` には組み込まず、モジュール単位で実行する。
+
+```bash
+uv run python -m ouj_notebook_converter.detectors.numbering \
+  --pred /path/to/output_or_cache \
+  --json numbering.json
+```
+
+- `--pred`: 精度評価と同じ。ページキャッシュの `raw.md` には後処理（`normalize_ocr_markdown`）を適用して読み込む。
+  `\tag{N.M}` と行末の「(N.M)」のどちらも定義とみなすので、後処理の前後どちらでも結果は変わらない
+- 指摘の種類: `missing`（欠番。前後の定義があるページと参照元を表示）、`duplicate`（重複定義）、
+  `order`（順序の逆転）、`undefined_reference`（最大の定義番号を超える番号への参照）
+- 章の最大番号が欠落した場合は、その番号への参照が無い限り検出できない。Gemini 形式の Markdown（太字ラベル・`\tag`）を前提とし、
+  yomitoku の出力は対象外
+
 ## アーキテクチャ概要
 
 ```
