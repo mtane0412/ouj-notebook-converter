@@ -9,13 +9,18 @@ OCR（主に Gemini）は書籍の右寄せ式番号を LaTeX 命令で再現し
   - 数式外の \\tag{X} を「(X)」に変換する
   - 本体が \\tag{X} だけの数式（$...$ / $$...$$ / equation 環境）を「(X)」に変換する
   - 数式外の \\quad / \\qquad を全角スペース 1 個 / 2 個に置き換える
+  - 数式内の eqnarray*（番号なし）を aligned に置き換える（KaTeX は eqnarray を描画できない）
+  - 数式内の array 環境の列指定から @{...}（列間の空白指定）を取り除く（KaTeX が未対応）
   - 節番号（N.M）を持つ H3 以下の見出しを H2 に揃える
   - 見出し化された「例 N.M」「コメント N.M (C)」などのラベルを太字に戻す
 
 注意事項:
   - コードフェンス内（図のテキスト表現など）は一切変更しない
   - H1 見出しは章検出（chapter_detect）の判定対象のため変更しない
-  - 式本体を持つ数式の中身は変更しない
+  - 式本体を持つ数式の中身は、上記の置き換え以外は変更しない
+  - \\cline（罫線の範囲）・\\multicolumn（セルの結合）・\\enclose（割り算記号）は KaTeX に同等の
+    表記が無く、置き換えると筆算の意味が変わるため変換しない（品質レポートで検出する）
+  - 番号付きの eqnarray は式番号が失われるため変換しない
 """
 
 from __future__ import annotations
@@ -42,6 +47,13 @@ _MATH_DELIMITERS = re.compile(
     r"^(\$\$|\$|\\begin\{equation\*?\})([\s\S]*?)(\$\$|\$|\\end\{equation\*?\})$"
 )
 
+# eqnarray*（番号なし）の開始・終了。KaTeX の aligned は番号を付けないため同等に置き換えられる
+_EQNARRAY_STAR = re.compile(r"\\(begin|end)\{eqnarray\*\}")
+# array 環境の列指定（{r@{\,}l} など。@{...} のように 1 段までの波括弧を含みうる）
+_ARRAY_COLUMN_SPEC = re.compile(r"(\\begin\{array\}\{)((?:[^{}]|\{[^{}]*\})*)(\})")
+# 列指定中の @{...}（列間の空白指定。取り除いても式の意味は変わらない）
+_COLUMN_SPACING = re.compile(r"@\{[^{}]*\}")
+
 _HFILL = re.compile(r"[ \t]*\\hfill(?![a-zA-Z])[ \t]*")
 _TAG = re.compile(r"\\tag\{([^{}]+)\}")
 _QQUAD = re.compile(r"\\qquad(?![a-zA-Z])")
@@ -62,8 +74,20 @@ _LABEL_HEADING = re.compile(
 _FULLWIDTH_SPACE = "\u3000"
 
 
+def _to_katex_supported(span: str) -> str:
+    """KaTeX が描画できない表記のうち、意味を変えずに置き換えられるものを置き換える。"""
+    span = _EQNARRAY_STAR.sub(r"\\\1{aligned}", span)
+    return _ARRAY_COLUMN_SPEC.sub(
+        lambda m: m.group(1) + _COLUMN_SPACING.sub("", m.group(2)) + m.group(3), span
+    )
+
+
 def _normalize_math_span(span: str) -> str:
-    """本体が \\tag{X} だけの数式を式番号テキスト「(X)」に変換し、それ以外はそのまま返す。"""
+    """数式スパンを正規化する。
+
+    KaTeX 未対応の表記を置き換え、本体が \\tag{X} だけの数式は式番号テキスト「(X)」に変換する。
+    """
+    span = _to_katex_supported(span)
     delimited = _MATH_DELIMITERS.match(span)
     if delimited is None:
         return span

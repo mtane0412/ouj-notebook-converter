@@ -487,3 +487,48 @@ class TestBuildPageMarkdownInlineParagraph:
         assert any("raw.md" in r.message for r in caplog.records)
         # 置換されないので元テキストは変更されない
         assert result.markdown == "全く無関係なテキスト\n"
+
+
+class TestBuildPageMarkdownCorrections:
+    """build_page_markdown の人手修正（corrections）適用テスト。"""
+
+    def _analysis(self, tmp_path: Path, raw: str, page_index: int = 69) -> PageAnalysis:
+        raw_md = tmp_path / "raw.md"
+        raw_md.write_text(raw, encoding="utf-8")
+        return PageAnalysis(
+            page_index=page_index,
+            yomitoku_json_path=tmp_path / "analysis.json",
+            figure_paths=[],
+            markdown_raw_path=raw_md,
+        )
+
+    def test_修正が反映されキャッシュのraw_mdは変更されない(self, tmp_path: Path) -> None:
+        from ouj_notebook_converter.corrections import Correction
+
+        analysis = self._analysis(tmp_path, "著者は服部正博である。\n")
+        corrections = (Correction(page=70, before="服部", after="隈部"),)
+
+        result = build_page_markdown(analysis, corrections=corrections)
+
+        assert "隈部正博" in result.markdown
+        assert analysis.markdown_raw_path.read_text(encoding="utf-8") == "著者は服部正博である。\n"
+
+    def test_修正は生のテキストへ適用されraw_markdownにも反映される(self, tmp_path: Path) -> None:
+        from ouj_notebook_converter.corrections import Correction
+
+        analysis = self._analysis(tmp_path, "著者は服部正博である。\n")
+        corrections = (Correction(page=70, before="服部", after="隈部"),)
+        overlay = MathOverlay(items={}, roles={}, originals={})
+
+        result = build_page_markdown(analysis, math_overlay=overlay, corrections=corrections)
+
+        assert result.raw_markdown == "著者は隈部正博である。\n"
+
+    def test_置換前が見つからなければ頁を示して例外(self, tmp_path: Path) -> None:
+        from ouj_notebook_converter.corrections import Correction, CorrectionError
+
+        analysis = self._analysis(tmp_path, "本文\n")
+        corrections = (Correction(page=70, before="存在しない", after="X"),)
+
+        with pytest.raises(CorrectionError, match="70 ページ"):
+            build_page_markdown(analysis, corrections=corrections)
