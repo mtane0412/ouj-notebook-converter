@@ -8,7 +8,7 @@
   4. math_backend に応じて detect_fn で数式を LaTeX に変換
      - "pix2text" : detect_fn（Pix2Text 検出 + 認識）
      - "none"     : スキップ
-  5. post_process でPageMarkdownを構築
+  5. post_process でPageMarkdownを構築（ConvertConfig.corrections があれば人手修正を適用）
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
+from ouj_notebook_converter.corrections import Correction, CorrectionError
 from ouj_notebook_converter.pipeline.stages.math_detect import math_detect
 from ouj_notebook_converter.pipeline.stages.ocr import analyze_page
 from ouj_notebook_converter.pipeline.stages.post_process import build_page_markdown
@@ -60,6 +61,8 @@ class ConvertConfig:
     math_engine: Any = field(default=None)  # MathDetectorProtocol 互換オブジェクト
     math_backend: Literal["none", "pix2text"] = "none"
     no_cache: bool = False  # True の場合はキャッシュを無視して OCR を再実行する
+    # 人手修正: 1 始まりのページ番号 -> そのページの修正（corrections.load_corrections の戻り値）
+    corrections: dict[int, tuple[Correction, ...]] = field(default_factory=dict)
 
 
 def run_pages(
@@ -86,6 +89,14 @@ def run_pages(
         RuntimeError: ページ処理中に回復不能なエラーが発生した場合。
     """
     _analyze = analyze_fn or _default_analyze_fn(config)
+
+    # 存在しないページへの修正は番号の誤記とみなして、OCR を始める前に停止する
+    out_of_range = sorted(p for p in config.corrections if p > loader.total_pages)
+    if out_of_range:
+        raise CorrectionError(
+            f"修正ファイルに総ページ数 {loader.total_pages} を超えるページがあります: "
+            f"{', '.join(f'{p} ページ' for p in out_of_range)}"
+        )
 
     target_set = set(config.page_indices)
     results: list[PageMarkdown] = []
@@ -131,7 +142,11 @@ def run_pages(
             _detect = detect_fn or _default_detect_fn(config)
             overlay = _detect(image, analysis, page_cache_dir, detector=config.math_engine)
 
-        page_md = build_page_markdown(analysis, math_overlay=overlay)
+        page_md = build_page_markdown(
+            analysis,
+            math_overlay=overlay,
+            corrections=config.corrections.get(raw_index + 1, ()),
+        )
         results.append(page_md)
 
     return results
