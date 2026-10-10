@@ -423,6 +423,26 @@ uv run python -m ouj_notebook_converter.evaluation \
 - 中断しても同じコマンドで再開できる（完了済みページは API を呼ばない）。レート制限（HTTP 429/500/503）は待って再試行する
 - ページキャッシュ（`ounc`）のディレクトリ名は、既定以外のモデル・DPI を指定すると `…gemini-<モデル名>-<DPI>dpi` のように分かれる（既定値は従来どおり `…gemini`）
 
+#### プロンプトの比較と後処理の発火件数（#26）
+
+Gemini のプロンプトを変えたときの効果は、同一条件でも CER が 1.5〜3.6% 動くため、各条件を 3 回以上実行して平均と最小〜最大で比べる（1 回ずつの比較では判定できない）。
+
+```bash
+# 条件ごとに run1〜run3 を再 OCR する
+for run in run1 run2 run3; do
+  uv run python -m ouj_notebook_converter.evaluation.reocr \
+    --truth /path/to/eval --pdf /path/to/原本.pdf \
+    --prompt-file experiments/prompts/gemini_ocr_v3.txt \
+    --out /path/to/experiments/issue-26/v3 --run-id $run
+  uv run python -m ouj_notebook_converter.evaluation --truth /path/to/eval --pred /path/to/experiments/issue-26/v3/$run
+  # 後処理（normalize_ocr_markdown）の各ルールが生の出力に何回発火したかを数える
+  uv run python -m ouj_notebook_converter.evaluation.cleanup_stats --pred /path/to/experiments/issue-26/v3/$run
+done
+```
+
+- `cleanup_stats` の出力は JSON。`hfill` / `tag` / `tag_only_math` / `quad` / `eqnarray_star` / `array_column_spacing` / `section_heading_level` / `label_heading` は後処理で直せた件数（合計が `total`）。`unfixable_*` と `empty_math` は後処理で直せない破綻の件数
+- `experiments/prompts/gemini_ocr_v1.txt`〜`v3.txt` は #26 で比較した改善案。いずれも既定プロンプトより総合精度が上がらなかったため `gemini.py` には採用していない（結果は issue #26 を参照）。評価セットの正解が現行プロンプトの出力を下書きに作られているため、現行プロンプトと書式が異なる出力は不利に評価される点に注意する
+
 ### 複数回 OCR の揺れによる不確実箇所の検出と多数決（プロトタイプ）
 
 同じページを同じ条件で複数回 OCR し、実行間で食い違う箇所（地の文・数式）を「OCR が自信を持てない箇所」として抽出する。
