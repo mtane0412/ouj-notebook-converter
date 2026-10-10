@@ -118,6 +118,53 @@ uv run ounc 数式入りPDF.pdf --outdir /tmp/output \
     --no-math-auto-start
 ```
 
+## 人手修正ファイル
+
+人が確認した OCR の誤読は、キャッシュの `raw.md` を書き換えず、修正ファイル（JSON）として別管理し、
+`--corrections` で変換時に適用する。再 OCR（`--no-cache` や OCR 設定の変更）をしても修正は失われず、
+いつ誰が何を直したかが記録として残る。修正ファイルは教材の本文を含むため、リポジトリ外
+（例: 書籍フォルダ直下の `corrections.json`）に置く。
+
+```bash
+uv run ounc book.pdf -o out --corrections /path/to/corrections.json
+```
+
+### 形式（version 1）
+
+```json
+{
+  "version": 1,
+  "corrections": [
+    {
+      "page": 70,
+      "before": "(\\sqrt[3]{a})^4 > (\\sqrt[3]{a})^3$ だから",
+      "after": "(\\sqrt[4]{a})^4 > (\\sqrt[4]{a})^3$ だから",
+      "reason": "4 乗根の添字の誤読",
+      "reviewer": "mtane0412",
+      "date": "2026-10-10"
+    }
+  ]
+}
+```
+
+| キー | 必須 | 内容 |
+|------|------|------|
+| `page` | 必須 | PDF のページ番号（1 始まり。キャッシュの `page_NNNN` と同じ） |
+| `before` | 必須 | 置換前の文字列。当該ページの OCR Markdown（`raw.md`）にちょうど 1 か所だけ現れること |
+| `after` | 必須 | 置換後の文字列（`before` と同じは不可） |
+| `reason` / `reviewer` / `date` | 任意 | 記録用。適用結果には影響しない |
+
+- 同一ページの修正は配列の記載順に適用する。未知のキーは形式エラーになる
+- 置換前が見つからない場合・複数一致する場合・`page` が総ページ数を超える場合は、
+  どのページのどの修正かを示して変換を停止する（暗黙にスキップしない）。複数一致する場合は前後の文字を足して一意にする
+- `--pages` の対象外のページの修正は適用されない（総ページ数の範囲内であれば検証もされない）
+
+### 適用タイミング
+
+`build_page_markdown` の中で、`raw.md` を読み込んだ直後（数式 overlay の適用・`normalize_ocr_markdown` より前）に適用する。
+`before` / `after` は OCR が出力した `raw.md` 上の表記で書き、後処理の正規化規則の影響を受けない。
+章検出に使う `raw_markdown` にも修正後のテキストが渡る。LLM 判定の結果もこの形式で書き出して適用する想定である。
+
 ## オプション一覧
 
 ```
@@ -146,6 +193,7 @@ Options:
       --ocr-backend [yomitoku|gemini]         OCR バックエンド [default: yomitoku]
       --gemini-api-key TEXT                   Gemini API キー [env: GEMINI_API_KEY]
       --gemini-model TEXT                     Gemini モデル名 [default: gemini-3.8-flash]
+      --corrections PATH                      人手修正ファイル（JSON）。変換時に適用する
   -v, --verbose / -q, --quiet
 ```
 
