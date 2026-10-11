@@ -450,10 +450,10 @@ class TestOcrBackendOption:
 
         mock_load_pypdfium.assert_called_once()
 
-    def test_ocr_backend_gemini時にformat_pdfを指定するとOCR前にエラーで停止する(
+    def test_gemini_pdf_without_word_bbox_cache_stops_before_ocr(
         self, mocker: MagicMock, tmp_path: Path
     ) -> None:
-        """Gemini は単語 bbox を返さないため、サーチャブル PDF 出力は OCR 前に拒否されること。"""
+        """Gemini は単語 bbox を返さないため、yomitoku のキャッシュを指定しない PDF 出力は OCR 前に拒否されること。"""
         pdf_path = tmp_path / "テスト教材.pdf"
         pdf_path.write_bytes(b"%PDF-1.4")
 
@@ -474,10 +474,115 @@ class TestOcrBackendOption:
         )
 
         assert result.exit_code == 1
-        assert "--format pdf" in result.output + (result.stderr or "")
+        assert "--word-bbox-cache" in result.output + (result.stderr or "")
         # OCR（API 呼び出し）が一切行われないこと
         mock_create.assert_not_called()
         mock_run_pages.assert_not_called()
+
+    def test_word_bbox_cache_requires_gemini_backend(self, tmp_path: Path) -> None:
+        """yomitoku バックエンドでは自分の単語 bbox を使うため、指定を無視せずエラーにする。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--format", "pdf",
+                "--word-bbox-cache", str(tmp_path),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "--word-bbox-cache" in result.output + (result.stderr or "")
+
+    def _patch_gemini_pipeline(self, mocker: MagicMock, total_pages: int) -> MagicMock:
+        """Gemini の OCR を行わないよう、ローダー・アナライザー・run_pages を差し替える。"""
+        mock_loader = mocker.MagicMock()
+        mock_loader.total_pages = total_pages
+        mocker.patch(
+            "ouj_notebook_converter.pipeline.stages.load_pypdfium.load_pdf_pages_pypdfium2",
+            return_value=mock_loader,
+        )
+        mocker.patch(
+            "ouj_notebook_converter.plugins.ocr.gemini.create_gemini_analyzer",
+            return_value=mocker.MagicMock(),
+        )
+        return mocker.patch("ouj_notebook_converter.cli.run_pages")
+
+    def test_missing_word_bbox_json_stops_before_ocr(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--word-bbox-cache に対象ページの analysis.json が無ければ、OCR の前に停止する。"""
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        bbox_dir = tmp_path / "yomitoku"
+        (bbox_dir / "page_0001").mkdir(parents=True)
+        (bbox_dir / "page_0001" / "analysis.json").write_text("{}", encoding="utf-8")
+        mock_run_pages = self._patch_gemini_pipeline(mocker, total_pages=2)
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー",
+                "--format", "pdf",
+                "--word-bbox-cache", str(bbox_dir),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "2 ページ" in result.output + (result.stderr or "")
+        mock_run_pages.assert_not_called()
+
+    def test_gemini_pdf_with_word_bbox_cache_reports_alignment(
+        self, mocker: MagicMock, tmp_path: Path
+    ) -> None:
+        """--word-bbox-cache を指定すると Gemini でも searchable PDF を出力し、割り当て件数を報告する。"""
+        from ouj_notebook_converter.exporters.text_layer import AlignmentStats
+        from ouj_notebook_converter.pipeline.types import PageMarkdown
+
+        pdf_path = tmp_path / "テスト教材.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4")
+        bbox_dir = tmp_path / "yomitoku"
+        (bbox_dir / "page_0001").mkdir(parents=True)
+        (bbox_dir / "page_0001" / "analysis.json").write_text("{}", encoding="utf-8")
+        mock_run_pages = self._patch_gemini_pipeline(mocker, total_pages=1)
+        mock_run_pages.return_value = [PageMarkdown(page_index=0, markdown="本文")]
+        mock_export_pdf = mocker.patch(
+            "ouj_notebook_converter.exporters.pdf.export_pdf",
+            return_value=AlignmentStats(
+                words=10,
+                words_without_text=2,
+                chars=100,
+                chars_matched=90,
+                chars_replaced=6,
+                chars_inserted=4,
+                chars_unplaced=3,
+            ),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                str(pdf_path),
+                "--outdir", str(tmp_path / "out"),
+                "--ocr-backend", "gemini",
+                "--gemini-api-key", "テスト用APIキー",
+                "--format", "pdf",
+                "--word-bbox-cache", str(bbox_dir),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert mock_export_pdf.call_args.kwargs["word_bbox_dir"] == bbox_dir
+        output = result.output + (result.stderr or "")
+        assert "空にした単語 2" in output
+        assert "隣の単語に入れた文字 4" in output
+        assert "単語が無く置けなかった文字 3" in output
 
     def test_ocr_backend_yomitokuがデフォルト(self) -> None:
         """--ocr-backend のデフォルトが yomitoku であること。"""

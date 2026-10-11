@@ -40,6 +40,22 @@ class TestProse:
         assert split_markdown("第１章　ＡＢＣ").prose == "第1章ABC"
 
 
+class TestMathToText:
+    """数式を地の文に変換する関数の差し替え（searchable PDF のテキストレイヤー作成で使う）。"""
+
+    def test_replaces_math_with_given_function(self) -> None:
+        """math_to_text を渡すと、数式（区切り記号付き）をその戻り値に置き換えて地の文に含める。"""
+        parts = split_markdown("ここで $x = 1$ とおく。", math_to_text=lambda span: f"[{span}]")
+
+        assert parts.prose == "ここで[$x=1$]とおく。"
+
+    def test_formulas_are_still_extracted(self) -> None:
+        """math_to_text を渡しても数式の一覧は変わらない。"""
+        parts = split_markdown("$x$ と $y$", math_to_text=lambda span: "")
+
+        assert parts.formulas == (Formula(tex="x", display=False), Formula(tex="y", display=False))
+
+
 class TestFormulas:
     """数式の抽出。"""
 

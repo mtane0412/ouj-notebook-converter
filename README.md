@@ -65,7 +65,22 @@ uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemi
 uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini --gemini-model gemini-3.5-flash
 ```
 
-> **注意**: Gemini バックエンドは単語の位置情報（bbox）を返さないため、`--format pdf`（searchable PDF）とは併用できない。searchable PDF が必要な場合は `--ocr-backend yomitoku` を使用する。
+### searchable PDF（`--format pdf`）
+
+Gemini バックエンドは単語の位置情報（bbox）を返さない。そのため、searchable PDF を出力するときは、同じ PDF を同じ `--dpi` で yomitoku で変換したページキャッシュを `--word-bbox-cache` で指定する。テキストレイヤーの位置には yomitoku の単語（行）の bbox を使い、文字には Gemini の Markdown（人手修正・後処理の適用後）を使う。
+
+```bash
+# 先に yomitoku で変換してページキャッシュを作る（Markdown 等は不要なら破棄してよい）
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/yomitoku --cache-dir /tmp/yomitoku-cache
+# Gemini の文字で searchable PDF を作る
+uv run ounc 放送大学テキスト.pdf --outdir /tmp/output --ocr-backend gemini -f pdf \
+  --word-bbox-cache /tmp/yomitoku-cache/放送大学テキスト.<ハッシュ>.yomitoku
+```
+
+- 文字と単語の対応は、yomitoku の単語を読み順に並べてつなげた文字列と Gemini の文字列を文字単位で突き合わせて決める。数式は検索しやすい平文に崩す（例: `x^2` → `x2`、`\frac{a}{b}` → `a/b`）
+- Gemini の文字は捨てない。yomitoku が読み落とした文字は直後の単語に入れる。Gemini に対応する文字が無い単語（柱・ノンブルなど）は空にする。yomitoku が単語を 1 つも検出しなかったページ（図だけのページなど）の文字は描画できないため、置けなかった文字として数える。変換後に、それぞれの件数を表示する
+- `--word-bbox-cache` に対象ページの `page_NNNN/analysis.json` が 1 つでも無ければ、OCR を始める前にエラーで停止する
+- yomitoku が単語として検出しなかった行（数式の行に多い）の文字は、隣の行の位置に詰めて入る。検索はできるが、ハイライトの位置はずれる
 
 ## 数式変換
 
@@ -194,6 +209,8 @@ Options:
       --gemini-api-key TEXT                   Gemini API キー [env: GEMINI_API_KEY]
       --gemini-model TEXT                     Gemini モデル名 [default: gemini-3.8-flash]
       --corrections PATH                      人手修正ファイル（JSON）。変換時に適用する
+      --word-bbox-cache PATH                  searchable PDF の単語の位置に使う yomitoku のページキャッシュ
+                                              （--ocr-backend gemini で -f pdf のとき必須）
   -v, --verbose / -q, --quiet
 ```
 
@@ -236,6 +253,23 @@ uv run python -m ouj_notebook_converter.evaluation \
 - `--truth`: `manifest.json`（`{"pages": [{"page": 70, "category": "数式中心"}]}`）と正解 `page_NNNN.md` を置いたディレクトリ
 - `--pred`: `ounc --no-combine` の出力ディレクトリ、またはページキャッシュ（`page_NNNN/raw.md`）のディレクトリ
 - 指標: 地の文の文字誤り率（CER）、数式の一致率（F1）と文字誤り率、見出し（レベル・テキスト）の一致率（F1）、KaTeX で描画できない数式の件数。ページ別・層別・全体で表示する
+
+### searchable PDF のテキストレイヤーの評価
+
+評価セットのページだけで searchable PDF を作り、PDF から抽出したテキストを正解と比べる（issue #42）。
+
+```bash
+uv run python -m ouj_notebook_converter.evaluation.text_layer_cer \
+  --truth /path/to/eval --pdf 教材.pdf \
+  --word-bbox-cache /path/to/yomitoku-cache --gemini-cache /path/to/gemini-cache \
+  --corrections corrections.json --legacy-pdf 既存の_searchable.pdf \
+  --out-dir /tmp/text-layer --json result.json
+```
+
+- 比べるテキストレイヤー: `yomitoku`（yomitoku の文字）、`gemini`（yomitoku の単語 bbox に Gemini の文字を割り当てたもの）、`legacy`（`--legacy-pdf` で指定した既存の PDF。省略可）
+- 指標: 全文 CER（正解を、テキストレイヤーと同じ規則で記法を除き数式を平文化した文字列と比べる。数式の平文化の規則が Gemini 側と同じため、数式の多いページでは Gemini 側に有利に出る）と、日本語 CER（かな・漢字だけを比べる）
+- `--out-dir` に `yomitoku.pdf` と `gemini.pdf`（評価ページだけを含む）を書き出す
+- `--corrections` のうち評価セットに無いページの修正は適用しない。そのページ番号を標準出力と結果 JSON の `corrections_outside_eval` に出す
 
 ### 変換時の品質レポート（KaTeX 描画可否）
 

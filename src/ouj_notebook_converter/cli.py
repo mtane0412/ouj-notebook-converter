@@ -187,6 +187,17 @@ def convert(
             help="人手修正ファイル（JSON）。OCR 結果に変換時に適用する（キャッシュは変更しない）",
         ),
     ] = None,
+    word_bbox_cache: Annotated[
+        Path | None,
+        typer.Option(
+            "--word-bbox-cache",
+            help=(
+                "searchable PDF の単語の位置に使う yomitoku のページキャッシュ（page_NNNN/analysis.json を"
+                "含むディレクトリ）。--ocr-backend gemini で --format pdf を出力するときに必須。"
+                "yomitoku も同じ --dpi で OCR したものを指定する"
+            ),
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("-v/-q", "--verbose/--quiet")] = False,
 ) -> None:
     """PDF ファイルを指定した形式に変換する。"""
@@ -206,13 +217,26 @@ def convert(
         )
         raise typer.Exit(code=1)
 
-    # Gemini は単語 bbox を返さず searchable PDF のテキストレイヤーを作れないため、
-    # API を呼び出す前に組み合わせを拒否する
-    if ocr_backend == OcrBackend.gemini and format and OutputFormat.pdf in format:
+    # yomitoku は自分の単語 bbox を使うため、指定を黙って無視せずに拒否する
+    if word_bbox_cache is not None and ocr_backend != OcrBackend.gemini:
+        typer.echo(
+            "エラー: --word-bbox-cache は --ocr-backend gemini のときだけ指定できます。",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Gemini は単語 bbox を返さないため、searchable PDF のテキストレイヤーの位置には
+    # yomitoku のページキャッシュが必要になる。API を呼び出す前に指定を確認する
+    if (
+        ocr_backend == OcrBackend.gemini
+        and format
+        and OutputFormat.pdf in format
+        and word_bbox_cache is None
+    ):
         typer.echo(
             "エラー: --ocr-backend gemini は単語の位置情報を返さないため、"
-            "--format pdf（searchable PDF）は出力できません。"
-            "--ocr-backend yomitoku を使用してください。",
+            "--format pdf（searchable PDF）には --word-bbox-cache で"
+            "yomitoku のページキャッシュを指定してください。",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -293,6 +317,19 @@ def convert(
     page_indices_1based = parse_page_range(pages, total=loader.total_pages)
     page_indices = [p - 1 for p in page_indices_1based]  # 0-origin に変換
 
+    # 単語 bbox の JSON が欠けていると PDF 出力で停止するため、OCR（API 課金）の前に確認する
+    if word_bbox_cache is not None:
+        from ouj_notebook_converter.exporters.pdf import find_missing_word_bbox_pages
+
+        missing = find_missing_word_bbox_pages(word_bbox_cache, page_indices)
+        if missing:
+            typer.echo(
+                f"エラー: --word-bbox-cache に analysis.json が無いページがあります: "
+                f"{', '.join(f'{p} ページ' for p in missing)}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
     book_name = input_pdf.stem
     # OCR 結果はバックエンド・Gemini モデル・DPI で変わるため、キャッシュをこれらの単位で分離する
     book_cache_dir = effective_cache_dir / (
@@ -364,7 +401,22 @@ def convert(
         from ouj_notebook_converter.exporters.pdf import export_pdf
 
         pdf_path = outdir / f"{book_name}_searchable.pdf"
-        export_pdf(page_markdowns, pdf_path, assets_dir, source_pdf=input_pdf, dpi=dpi)
+        stats = export_pdf(
+            page_markdowns,
+            pdf_path,
+            assets_dir,
+            source_pdf=input_pdf,
+            dpi=dpi,
+            word_bbox_dir=word_bbox_cache,
+        )
+        if stats is not None:
+            # 単語に対応しなかった箇所の件数を報告する（暗黙に補わないため）
+            typer.echo(
+                f"テキストレイヤー: 文字 {stats.chars}（yomitoku と一致 {stats.chars_matched}・"
+                f"置換 {stats.chars_replaced}・隣の単語に入れた文字 {stats.chars_inserted}・"
+                f"単語が無く置けなかった文字 {stats.chars_unplaced}）、"
+                f"単語 {stats.words}（対応する文字が無く空にした単語 {stats.words_without_text}）"
+            )
         if verbose:
             typer.echo(f"Searchable PDF 出力: {pdf_path}")
 

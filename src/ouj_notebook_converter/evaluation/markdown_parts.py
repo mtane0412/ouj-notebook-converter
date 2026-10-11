@@ -10,12 +10,15 @@
   - コードフェンス内の行は見出し・数式として扱わないが、地の文には含める（図中の文字も本文の一部とみなす）
   - 数式内の \\text{...} の中身と \\tag{X}（「(X)」として）は地の文として扱う。OCR が日本語や
     式番号を数式の中に入れても外に出しても、同じ地の文・同じ数式として比較するため
+  - split_markdown の math_to_text を差し替えると、数式を地の文にどう含めるかを変えられる
+    （searchable PDF のテキストレイヤーでは数式を平文に崩して含める）
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ouj_notebook_converter.pipeline.stages.markdown_cleanup import (
@@ -105,15 +108,20 @@ _LATEX_ALIASES = {
 _TRAILING_PUNCTUATION = re.compile(r"[.,。、]+$")
 
 
-def split_markdown(markdown: str) -> MarkdownParts:
+def split_markdown(
+    markdown: str, *, math_to_text: Callable[[str], str] | None = None
+) -> MarkdownParts:
     """1 ページ分の Markdown を地の文・数式・見出しに分解する。
 
     Args:
         markdown: 1 ページ分の Markdown 文字列。
+        math_to_text: 数式（区切り記号を含む文字列）を地の文に含める文字列へ変換する関数。
+            省略時は数式内の \\text{...} と \\tag{X} だけを地の文として残す。
 
     Returns:
         分解結果。
     """
+    to_text = math_to_text or _prose_in_math
     formulas: list[Formula] = []
     prose_lines: list[str] = []
     headings: list[Heading] = []
@@ -128,7 +136,7 @@ def split_markdown(markdown: str) -> MarkdownParts:
             continue
         formulas.extend(_to_formula(m.group(0)) for m in MATH_SPAN.finditer(segment))
         # 数式を「数式内の地の文」に置き換えてから行単位で記法を除く（数式は複数行にまたがりうるため先に除く）
-        without_math = MATH_SPAN.sub(lambda m: f" {_prose_in_math(m.group(0))} ", segment)
+        without_math = MATH_SPAN.sub(lambda m: f" {to_text(m.group(0))} ", segment)
         for line in without_math.splitlines():
             heading = _HEADING.match(line)
             if heading is not None:
