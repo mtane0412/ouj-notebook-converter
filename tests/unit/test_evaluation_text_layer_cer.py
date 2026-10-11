@@ -88,7 +88,13 @@ def test_cli_compares_yomitoku_and_gemini_text_layers(tmp_path: Path) -> None:
     corrections = tmp_path / "corrections.json"
     _write_json(
         corrections,
-        {"version": 1, "corrections": [{"page": 1, "before": "にっいて", "after": "について"}]},
+        {
+            "version": 1,
+            "corrections": [
+                {"page": 1, "before": "にっいて", "after": "について"},
+                {"page": 5, "before": "評価対象外の誤読", "after": "評価対象外の修正"},
+            ],
+        },
     )
     result_json = tmp_path / "result.json"
 
@@ -119,6 +125,9 @@ def test_cli_compares_yomitoku_and_gemini_text_layers(tmp_path: Path) -> None:
     assert report["pages"][0]["page"] == 1
     assert report["alignment"]["chars_replaced"] == 1
     assert (tmp_path / "out" / "gemini.pdf").is_file()
+    # 評価セットに無いページの修正は、無視せず適用しなかったページとして報告する
+    assert report["corrections_outside_eval"] == [5]
+    assert "評価対象外のため適用しなかった修正のページ: 5" in result.output
 
 
 def test_cli_scores_existing_searchable_pdf_by_book_page(tmp_path: Path) -> None:

@@ -269,6 +269,7 @@ uv run python -m ouj_notebook_converter.evaluation.text_layer_cer \
 - 比べるテキストレイヤー: `yomitoku`（yomitoku の文字）、`gemini`（yomitoku の単語 bbox に Gemini の文字を割り当てたもの）、`legacy`（`--legacy-pdf` で指定した既存の PDF。省略可）
 - 指標: 全文 CER（正解を、テキストレイヤーと同じ規則で記法を除き数式を平文化した文字列と比べる。数式の平文化の規則が Gemini 側と同じため、数式の多いページでは Gemini 側に有利に出る）と、日本語 CER（かな・漢字だけを比べる）
 - `--out-dir` に `yomitoku.pdf` と `gemini.pdf`（評価ページだけを含む）を書き出す
+- `--corrections` のうち評価セットに無いページの修正は適用しない。そのページ番号を標準出力と結果 JSON の `corrections_outside_eval` に出す
 
 ### 変換時の品質レポート（KaTeX 描画可否）
 

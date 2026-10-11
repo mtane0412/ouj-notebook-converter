@@ -21,6 +21,8 @@
 注意事項:
   - 評価セットの正解は Gemini の出力を下書きにしているため、Gemini 側の CER は低く出やすい
   - PDF からの抽出は pypdfium2 の get_text_bounded（ページ内の文字を描画順に返す）で行う
+  - 修正ファイルは書籍全体を対象にするため、評価セットに無いページの修正は適用しない。
+    そのページ番号は無視せず、標準出力と結果 JSON（corrections_outside_eval）に報告する
 """
 
 from __future__ import annotations
@@ -131,6 +133,8 @@ def main(
     """評価セットのページで、yomitoku と Gemini のテキストレイヤーの CER を比べる。"""
     eval_pages = load_manifest(truth)
     page_corrections = load_corrections(corrections) if corrections else {}
+    # 評価ページ以外の修正は適用されないため、ページ番号を報告用に控える
+    corrections_outside_eval = sorted(set(page_corrections) - {p.page for p in eval_pages})
 
     yomitoku_pages = [
         PageMarkdown(
@@ -186,6 +190,7 @@ def main(
         "pages": rows,
         "total": {name: _score_dict(score) for name, score in totals.items()},
         "alignment": _alignment_dict(alignment),
+        "corrections_outside_eval": corrections_outside_eval,
     }
     if json_path is not None:
         json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -196,6 +201,11 @@ def main(
             f"（{score.japanese.edits}/{score.japanese.truth_length}）"
         )
     typer.echo(f"割り当て件数: {_alignment_dict(alignment)}")
+    if corrections_outside_eval:
+        typer.echo(
+            "評価対象外のため適用しなかった修正のページ: "
+            + ", ".join(str(page) for page in corrections_outside_eval)
+        )
 
 
 def _add_cer(a: CerScore, b: CerScore) -> CerScore:
