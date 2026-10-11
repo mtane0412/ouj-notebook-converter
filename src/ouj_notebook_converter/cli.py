@@ -413,7 +413,8 @@ def convert(
             # 単語に対応しなかった箇所の件数を報告する（暗黙に補わないため）
             typer.echo(
                 f"テキストレイヤー: 文字 {stats.chars}（yomitoku と一致 {stats.chars_matched}・"
-                f"置換 {stats.chars_replaced}・隣の単語に入れた文字 {stats.chars_inserted}）、"
+                f"置換 {stats.chars_replaced}・隣の単語に入れた文字 {stats.chars_inserted}・"
+                f"単語が無く置けなかった文字 {stats.chars_unplaced}）、"
                 f"単語 {stats.words}（対応する文字が無く空にした単語 {stats.words_without_text}）"
             )
         if verbose:

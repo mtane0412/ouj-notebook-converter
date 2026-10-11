@@ -310,6 +310,33 @@ class TestWordBboxDir:
 
         assert _extract_text(out_pdf).replace("\r\n", "") == long_text
 
+    def test_page_without_words_reports_unplaced_chars(self, tmp_path: Path) -> None:
+        """単語が 1 つも無いページがあっても停止せず、置けなかった文字数を返す。"""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas as rl_canvas
+
+        source_pdf = tmp_path / "source.pdf"
+        c = rl_canvas.Canvas(str(source_pdf), pagesize=A4)
+        c.showPage()
+        c.showPage()
+        c.save()
+        bbox_dir = tmp_path / "yomitoku"
+        _write_words_json(bbox_dir / "page_0001" / "analysis.json", [("本文", 100, 200, 500, 240)])
+        _write_words_json(bbox_dir / "page_0002" / "analysis.json", [])
+        out_pdf = tmp_path / "output.pdf"
+
+        stats = export_pdf(
+            [_make_page(0, "本文"), _make_page(1, "図のキャプション")],
+            out_pdf,
+            tmp_path / "assets",
+            source_pdf=source_pdf,
+            word_bbox_dir=bbox_dir,
+        )
+
+        assert out_pdf.exists()
+        assert stats is not None
+        assert stats.chars_unplaced == 8
+
     def test_missing_word_bbox_json_stops_before_writing_pdf(self, tmp_path: Path) -> None:
         """対象ページの単語 bbox の JSON が無ければ、PDF を出力せずに停止する。"""
         source_pdf = tmp_path / "source.pdf"

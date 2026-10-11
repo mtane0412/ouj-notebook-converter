@@ -12,8 +12,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from ouj_notebook_converter.exporters.text_layer import (
     AlignmentStats,
     assign_text,
@@ -252,10 +250,13 @@ class TestAssignText:
 
         assert result.stats.chars_matched == 7
 
-    def test_no_words_with_text_raises(self) -> None:
-        """単語が無いのに割り当てる文字がある場合は、文字を捨てずに停止する。"""
-        with pytest.raises(ValueError, match="単語"):
-            assign_text([], "本文")
+    def test_text_without_words_is_counted_as_unplaced(self) -> None:
+        """単語が 1 つも無いページ（図だけのページなど）の文字は、置けなかった文字として数える。"""
+        result = assign_text([], "図のキャプション")
+
+        assert result.texts == ()
+        assert result.stats.chars == 8
+        assert result.stats.chars_unplaced == 8
 
     def test_stats_can_be_summed(self) -> None:
         """ページごとの件数を合算できる。"""

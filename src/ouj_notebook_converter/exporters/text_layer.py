@@ -14,7 +14,9 @@ Markdown（人手修正・後処理の適用後）から取る。対応付けは
     ページ末尾の文字は最後の単語に入れる
   - Gemini に対応する文字が無い単語（柱・ノンブルなど Gemini が書かない文字）は空にする。
     yomitoku の文字で補うと、Gemini 側で別の単語に入った文字と重複するため
-  - 件数（一致・置換・挿入した文字数、空にした単語数）を AlignmentStats で返し、呼び出し側が報告する
+  - 単語が 1 つも無いページ（図だけのページなど）の文字は描画できないため、置けなかった文字として数える
+    （ページ単位で停止すると、OCR の後に書籍全体の PDF 出力が止まるため）
+  - 件数（一致・置換・挿入・置けなかった文字数、空にした単語数）を AlignmentStats で返し、呼び出し側が報告する
 
 注意事項:
   - テキストレイヤーの文字は NFKC 正規化し、空白を除いた文字列になる（英単語間の空白は残らない）
@@ -308,6 +310,7 @@ class AlignmentStats:
         chars_matched: yomitoku と一致した文字数。
         chars_replaced: yomitoku の異なる文字の位置に割り当てた文字数。
         chars_inserted: yomitoku に対応する文字が無く、隣の単語に入れた文字数。
+        chars_unplaced: ページに単語が 1 つも無く、描画できなかった文字数。
     """
 
     words: int
@@ -316,6 +319,7 @@ class AlignmentStats:
     chars_matched: int
     chars_replaced: int
     chars_inserted: int
+    chars_unplaced: int = 0
 
     def __add__(self, other: AlignmentStats) -> AlignmentStats:
         return AlignmentStats(
@@ -343,17 +347,21 @@ def assign_text(word_texts: Sequence[str], text: str) -> TextAssignment:
         text: 割り当てる文字列（markdown_to_search_text の戻り値）。
 
     Returns:
-        単語ごとの文字列と件数。
-
-    Raises:
-        ValueError: 単語が 1 つも無いのに割り当てる文字がある場合（文字を捨てないため停止する）。
+        単語ごとの文字列と件数。単語が 1 つも無い場合、text の文字はすべて chars_unplaced に数える。
     """
     if not word_texts:
-        if text:
-            raise ValueError(
-                f"テキストを割り当てる単語がありません（割り当てる文字 {len(text)} 文字）。"
-            )
-        return TextAssignment(texts=(), stats=AlignmentStats(0, 0, 0, 0, 0, 0))
+        return TextAssignment(
+            texts=(),
+            stats=AlignmentStats(
+                words=0,
+                words_without_text=0,
+                chars=len(text),
+                chars_matched=0,
+                chars_replaced=0,
+                chars_inserted=0,
+                chars_unplaced=len(text),
+            ),
+        )
 
     normalized = [_WHITESPACE.sub("", unicodedata.normalize("NFKC", t)) for t in word_texts]
     joined = "".join(normalized)

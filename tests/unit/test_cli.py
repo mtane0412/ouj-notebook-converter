@@ -561,6 +561,7 @@ class TestOcrBackendOption:
                 chars_matched=90,
                 chars_replaced=6,
                 chars_inserted=4,
+                chars_unplaced=3,
             ),
         )
 
@@ -581,6 +582,7 @@ class TestOcrBackendOption:
         output = result.output + (result.stderr or "")
         assert "空にした単語 2" in output
         assert "隣の単語に入れた文字 4" in output
+        assert "単語が無く置けなかった文字 3" in output
 
     def test_ocr_backend_yomitokuがデフォルト(self) -> None:
         """--ocr-backend のデフォルトが yomitoku であること。"""
