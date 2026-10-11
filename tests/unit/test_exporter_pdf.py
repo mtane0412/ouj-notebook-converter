@@ -197,3 +197,133 @@ class TestExportPdf:
 
         doc = pypdfium2.PdfDocument(str(out_pdf))
         assert len(doc) == 2
+
+
+def _extract_text(pdf_path: Path, page_index: int = 0) -> str:
+    """出力 PDF の 1 ページから、ページ内に描画されたテキストを描画順に抽出する。"""
+    import pypdfium2
+
+    doc = pypdfium2.PdfDocument(str(pdf_path))
+    try:
+        return str(doc[page_index].get_textpage().get_text_bounded())
+    finally:
+        doc.close()
+
+
+def _write_words_json(path: Path, words: list[tuple[str, int, int, int, int]]) -> Path:
+    """段落 1 つに単語を並べた yomitoku 形式の JSON を書き出す（words は JSON に書く順）。"""
+    data = {
+        "paragraphs": [{"box": [0, 0, 1600, 2300], "order": 0, "direction": "horizontal"}],
+        "figures": [],
+        "words": [
+            {
+                "content": content,
+                "direction": "horizontal",
+                "points": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+            }
+            for content, x1, y1, x2, y2 in words
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+class TestTextLayerOrder:
+    """テキストレイヤーの描画順。"""
+
+    def test_draws_yomitoku_words_in_reading_order(self, tmp_path: Path) -> None:
+        """yomitoku の words はページの下の行から並ぶことがあるため、読み順に並べて描画する。"""
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        json_path = _write_words_json(
+            tmp_path / "analysis.json",
+            [("二行目の文", 100, 300, 500, 340), ("一行目の文", 100, 200, 500, 240)],
+        )
+        pages = [_make_page(0, "", yomitoku_json_path=json_path)]
+        out_pdf = tmp_path / "output.pdf"
+
+        export_pdf(pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf)
+
+        text = _extract_text(out_pdf)
+        assert text.index("一行目の文") < text.index("二行目の文")
+
+
+class TestWordBboxDir:
+    """別の OCR（Gemini）の文字を yomitoku の単語 bbox に差し込む。"""
+
+    def test_places_markdown_text_on_word_bboxes(self, tmp_path: Path) -> None:
+        """word_bbox_dir の単語 bbox に、PageMarkdown の Markdown の文字を割り当てて描画する。"""
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        bbox_dir = tmp_path / "yomitoku"
+        _write_words_json(
+            bbox_dir / "page_0001" / "analysis.json",
+            [("数の慨念", 100, 200, 500, 240), ("について", 100, 300, 500, 340)],
+        )
+        pages = [_make_page(0, "# 数の概念\n\nについて")]
+        out_pdf = tmp_path / "output.pdf"
+
+        stats = export_pdf(
+            pages, out_pdf, tmp_path / "assets", source_pdf=source_pdf, word_bbox_dir=bbox_dir
+        )
+
+        text = _extract_text(out_pdf)
+        assert "数の概念" in text
+        assert "慨念" not in text
+        assert stats is not None
+        assert stats.words == 2
+        assert stats.chars_replaced == 1
+
+    def test_returns_no_stats_without_word_bbox_dir(self, tmp_path: Path) -> None:
+        """word_bbox_dir を指定しない場合は割り当て件数を返さない。"""
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        json_path = tmp_path / "analysis.json"
+        _make_yomitoku_json(json_path)
+
+        stats = export_pdf(
+            [_make_page(0, "", yomitoku_json_path=json_path)],
+            tmp_path / "output.pdf",
+            tmp_path / "assets",
+            source_pdf=source_pdf,
+        )
+
+        assert stats is None
+
+    def test_fits_long_text_into_word_bbox_width(self, tmp_path: Path) -> None:
+        """yomitoku が読み落とした文字が単語に集まっても、ページの外にはみ出さず抽出できる。"""
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        bbox_dir = tmp_path / "yomitoku"
+        _write_words_json(bbox_dir / "page_0001" / "analysis.json", [("本文", 1300, 200, 1400, 240)])
+        long_text = "本文" + "読み落とされた長い文章" * 5
+        out_pdf = tmp_path / "output.pdf"
+
+        export_pdf(
+            [_make_page(0, long_text)],
+            out_pdf,
+            tmp_path / "assets",
+            source_pdf=source_pdf,
+            word_bbox_dir=bbox_dir,
+        )
+
+        assert _extract_text(out_pdf).replace("\r\n", "") == long_text
+
+    def test_missing_word_bbox_json_stops_before_writing_pdf(self, tmp_path: Path) -> None:
+        """対象ページの単語 bbox の JSON が無ければ、PDF を出力せずに停止する。"""
+        source_pdf = tmp_path / "source.pdf"
+        _make_minimal_pdf(source_pdf)
+        bbox_dir = tmp_path / "yomitoku"
+        bbox_dir.mkdir()
+        out_pdf = tmp_path / "output.pdf"
+
+        with pytest.raises(FileNotFoundError, match="1 ページ"):
+            export_pdf(
+                [_make_page(0, "本文")],
+                out_pdf,
+                tmp_path / "assets",
+                source_pdf=source_pdf,
+                word_bbox_dir=bbox_dir,
+            )
+        assert not out_pdf.exists()
